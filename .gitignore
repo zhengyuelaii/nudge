@@ -2,6 +2,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.vite/
 
 # 环境与凭证
 .env
