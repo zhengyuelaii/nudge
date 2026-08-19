@@ -1,0 +1,19 @@
+{
+  "name": "nudge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"pnpm:dev:*\"",
+    "dev:server": "pnpm --filter @nudge/server dev",
+    "dev:web": "pnpm --filter @nudge/web dev",
+    "build": "pnpm --filter @nudge/shared build && pnpm --filter @nudge/server build && pnpm --filter @nudge/web build",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"packages/*/src/**/*.{ts,vue}\""
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
