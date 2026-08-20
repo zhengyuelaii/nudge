@@ -54,6 +54,6 @@ interests.post('/:id/check', async (c) => {
   } catch (e) {
     const err = e as Error;
     const appError = Errors.internal(`检查失败: ${err.message}`);
-    return jsonError(c, appError.status, appError.code, appError.message);
+    return jsonError(c, appError.status, appError.message);
   }
 });

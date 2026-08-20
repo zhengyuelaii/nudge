@@ -13,8 +13,8 @@ app.route('/api', apiRoutes);
 
 app.onError((err, c) => {
   if (err instanceof AppError) {
-    return jsonError(c, err.status, err.code, err.message);
+    return jsonError(c, err.status, err.message);
   }
   console.error(err);
-  return jsonError(c, 500, 'INTERNAL', '服务器内部错误');
+  return jsonError(c, 500, '服务器内部错误');
 });

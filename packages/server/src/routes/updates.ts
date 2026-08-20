@@ -8,8 +8,9 @@ updates.get('/', (c) => {
   const interestIdRaw = parseOptionalInt(c, 'interest_id');
   const importanceRaw = parseOptionalInt(c, 'importance');
   const limitRaw = parseOptionalInt(c, 'limit');
-  if (!interestIdRaw.ok || !importanceRaw.ok || !limitRaw.ok) {
-    return jsonError(c, 400, 'VALIDATION', '查询参数无效');
+  const offsetRaw = parseOptionalInt(c, 'offset');
+  if (!interestIdRaw.ok || !importanceRaw.ok || !limitRaw.ok || !offsetRaw.ok) {
+    return jsonError(c, 400, '查询参数无效');
   }
   const since = c.req.query('since') ?? undefined;
 
@@ -18,6 +19,7 @@ updates.get('/', (c) => {
     since,
     importance: importanceRaw.value,
     limit: limitRaw.value,
+    offset: offsetRaw.value,
   });
   return jsonOk(c, data);
 });

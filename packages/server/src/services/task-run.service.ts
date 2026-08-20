@@ -13,6 +13,7 @@ export interface TaskRunRow {
   duration_ms: number | null;
   search_query: string | null;
   search_result_count: number | null;
+  updates_created_count: number | null;
   llm_input_tokens: number | null;
   llm_output_tokens: number | null;
   llm_total_cost: number | null;
@@ -26,7 +27,31 @@ export type RunErrorType = 'search_failed' | 'llm_failed' | 'notify_failed' | 'u
 
 export interface TaskRunListParams {
   interestId?: number;
+  status?: string;
   limit?: number;
+  offset?: number;
+}
+
+export interface TaskRunFilter {
+  interestId?: number;
+  status?: string;
+}
+
+function buildWhere(
+  userId: number,
+  f: TaskRunFilter,
+): { where: string; values: unknown[] } {
+  const conditions = ['r.user_id = ?'];
+  const values: unknown[] = [userId];
+  if (f.interestId) {
+    conditions.push('r.interest_id = ?');
+    values.push(f.interestId);
+  }
+  if (f.status) {
+    conditions.push('r.status = ?');
+    values.push(f.status);
+  }
+  return { where: conditions.join(' AND '), values };
 }
 
 export interface LlmUsage {
@@ -54,16 +79,9 @@ export const taskRunService = {
   },
 
   list(userId: number, params: TaskRunListParams = {}): TaskRunRow[] {
-    const conditions = ['r.user_id = ?'];
-    const values: unknown[] = [userId];
-
-    if (params.interestId) {
-      conditions.push('r.interest_id = ?');
-      values.push(params.interestId);
-    }
-
-    const where = conditions.join(' AND ');
+    const { where, values } = buildWhere(userId, params);
     const limit = params.limit ?? 20;
+    const offset = params.offset ?? 0;
 
     return db.prepare(`
       SELECT r.*, i.name AS interest_name
@@ -71,8 +89,16 @@ export const taskRunService = {
       LEFT JOIN interest i ON i.id = r.interest_id
       WHERE ${where}
       ORDER BY r.started_at DESC, r.id DESC
-      LIMIT ?
-    `).all(...values, limit) as TaskRunRow[];
+      LIMIT ? OFFSET ?
+    `).all(...values, limit, offset) as TaskRunRow[];
+  },
+
+  count(userId: number, params: TaskRunFilter = {}): number {
+    const { where, values } = buildWhere(userId, params);
+    const row = db
+      .prepare(`SELECT COUNT(*) AS c FROM task_run r WHERE ${where}`)
+      .get(...values) as { c: number };
+    return row.c;
   },
 
   succeed(
@@ -81,6 +107,7 @@ export const taskRunService = {
     stats: {
       searchQuery?: string;
       searchResultCount?: number;
+      updatesCreated?: number;
       llmInputTokens?: number;
       llmOutputTokens?: number;
     } = {},
@@ -94,6 +121,7 @@ export const taskRunService = {
       `UPDATE task_run
        SET status = 'success', finished_at = ?, duration_ms = ?,
            search_query = ?, search_result_count = ?,
+           updates_created_count = ?,
            llm_input_tokens = ?, llm_output_tokens = ?
        WHERE id = ? AND user_id = ?`,
     ).run(
@@ -101,6 +129,7 @@ export const taskRunService = {
       durationMs,
       stats.searchQuery ?? run.search_query,
       stats.searchResultCount ?? run.search_result_count,
+      stats.updatesCreated ?? run.updates_created_count,
       stats.llmInputTokens ?? run.llm_input_tokens,
       stats.llmOutputTokens ?? run.llm_output_tokens,
       id,
@@ -114,8 +143,9 @@ export const taskRunService = {
     errorType: RunErrorType,
     error: Error,
     usage?: LlmUsage,
+    updatesCreated?: number,
   ): void {
-    taskRunService.finish(userId, id, 'partial', errorType, error, usage);
+    taskRunService.finish(userId, id, 'partial', errorType, error, usage, updatesCreated);
   },
 
   fail(userId: number, id: number, errorType: RunErrorType, error: Error): void {
@@ -129,6 +159,7 @@ export const taskRunService = {
     errorType: RunErrorType,
     error: Error,
     usage?: LlmUsage,
+    updatesCreated?: number,
   ): void {
     const run = taskRunService.get(userId, id);
     const started = new Date(run.started_at + 'Z').getTime();
@@ -139,6 +170,7 @@ export const taskRunService = {
       `UPDATE task_run
        SET status = ?, finished_at = ?, duration_ms = ?,
            error_type = ?, error_message = ?,
+           updates_created_count = ?,
            llm_input_tokens = ?, llm_output_tokens = ?
        WHERE id = ? AND user_id = ?`,
     ).run(
@@ -147,6 +179,7 @@ export const taskRunService = {
       durationMs,
       errorType,
       error.message,
+      updatesCreated ?? run.updates_created_count,
       usage?.inputTokens ?? run.llm_input_tokens,
       usage?.outputTokens ?? run.llm_output_tokens,
       id,

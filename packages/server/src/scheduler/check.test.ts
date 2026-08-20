@@ -123,6 +123,7 @@ describe('runCheck', () => {
     expect(run.search_query).toBe('华友钴业 股价 最新');
     expect(run.llm_input_tokens).toBe(10);
     expect(run.llm_output_tokens).toBe(20);
+    expect(run.updates_created_count).toBe(1);
   });
 
   it('writes below-threshold updates without notifying', async () => {
@@ -227,6 +228,7 @@ describe('runCheck', () => {
     expect(run.error_type).toBe('notify_failed');
     expect(run.llm_input_tokens).toBe(10);
     expect(run.llm_output_tokens).toBe(20);
+    expect(run.updates_created_count).toBe(1);
 
     const update = db
       .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')

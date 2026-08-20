@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { api } from '../api/index.js';
+import { useTags } from '../composables/useTags.js';
+
+const { label, color } = useTags();
 
 interface Interest {
   id: number;
@@ -21,27 +25,12 @@ interface Update {
   is_read: number;
 }
 
+const route = useRoute();
 const interests = ref<Interest[]>([]);
 const selectedInterestId = ref<number | null>(null);
 const updates = ref<Update[]>([]);
 const loadingInterests = ref(true);
 const loadingUpdates = ref(false);
-
-const categoryLabel: Record<string, string> = {
-  finance: '财经',
-  tech: '科技',
-  policy: '政策',
-  game: '游戏',
-  company: '公司',
-};
-
-const categoryColor: Record<string, string> = {
-  finance: 'bg-blue-100 text-blue-700',
-  policy: 'bg-amber-100 text-amber-700',
-  tech: 'bg-green-100 text-green-700',
-  game: 'bg-purple-100 text-purple-700',
-  company: 'bg-blue-100 text-blue-700',
-};
 
 const importanceBadge = (n: number) => {
   if (n >= 8) return 'bg-red-100 text-red-700';
@@ -65,6 +54,10 @@ function timeAgo(dateStr: string): string {
 onMounted(async () => {
   try {
     interests.value = await api.get<Interest[]>('/interests');
+    const qid = Number(route.query.interest_id);
+    if (qid && interests.value.some((i) => i.id === qid)) {
+      selectedInterestId.value = qid;
+    }
   } catch (e) {
     console.error('加载兴趣失败:', e);
   } finally {
@@ -142,8 +135,8 @@ watch(selectedInterestId, async (id) => {
             <span v-if="item.source_url" class="text-gray-300">|</span>
             <a v-if="item.source_url" :href="item.source_url" target="_blank" class="text-blue-500 hover:underline">原文</a>
             <span v-if="item.interest_category" class="text-gray-300">|</span>
-            <span v-if="item.interest_category" class="rounded px-1.5 py-0.5 text-[11px]" :class="categoryColor[item.interest_category]">
-              {{ categoryLabel[item.interest_category] ?? item.interest_category }}
+            <span v-if="item.interest_category" class="rounded px-1.5 py-0.5 text-[11px]" :class="color(item.interest_category)">
+              {{ label(item.interest_category) }}
             </span>
           </div>
         </div>

@@ -24,6 +24,60 @@ beforeEach(() => {
 });
 
 describe('taskRunService', () => {
+  it('succeed records the number of updates saved for this run', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+
+    taskRunService.succeed(1, runId, {
+      searchResultCount: 5,
+      updatesCreated: 3,
+    });
+
+    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.updates_created_count).toBe(3);
+  });
+
+  it('succeed leaves updates_created_count NULL when not provided', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+
+    taskRunService.succeed(1, runId);
+
+    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.updates_created_count).toBeNull();
+  });
+
+  it('partial records the number of updates saved for this run', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+
+    taskRunService.partial(
+      1,
+      runId,
+      'notify_failed',
+      new Error('飞书发送失败: 19021'),
+      { inputTokens: 100, outputTokens: 50 },
+      2,
+    );
+
+    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.updates_created_count).toBe(2);
+  });
+
+  it('fail leaves updates_created_count NULL', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+
+    taskRunService.fail(1, runId, 'search_failed', new Error('Tavily HTTP 500'));
+
+    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.updates_created_count).toBeNull();
+  });
+
+  it('list returns the saved update count for each run', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.succeed(1, runId, { updatesCreated: 4 });
+
+    const rows = taskRunService.list(1, { limit: 10 });
+    expect(rows[0].updates_created_count).toBe(4);
+  });
+
   it('start creates a running task_run and returns its id', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
 
@@ -156,5 +210,43 @@ describe('taskRunService', () => {
     const rows = taskRunService.list(1, { interestId: seedInterestId });
     expect(rows).toHaveLength(1);
     expect(rows[0].interest_id).toBe(seedInterestId);
+  });
+
+  it('list paginates with limit/offset (newest first)', () => {
+    const ids = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      ids[i] = taskRunService.start(1, seedTaskId, seedInterestId);
+      taskRunService.succeed(1, ids[i]);
+    }
+
+    const page1 = taskRunService.list(1, { limit: 2, offset: 0 });
+    const page2 = taskRunService.list(1, { limit: 2, offset: 2 });
+    expect(page1).toHaveLength(2);
+    expect(page1[0].id).toBe(ids[2]);
+    expect(page1[1].id).toBe(ids[1]);
+    expect(page2).toHaveLength(1);
+    expect(page2[0].id).toBe(ids[0]);
+  });
+
+  it('list filters by status and count matches', () => {
+    const ok = taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.succeed(1, ok);
+    const bad = taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.fail(1, bad, 'search_failed', new Error('boom'));
+
+    const failed = taskRunService.list(1, { status: 'failed' });
+    expect(failed).toHaveLength(1);
+    expect(failed[0].id).toBe(bad);
+    expect(taskRunService.count(1, { status: 'failed' })).toBe(1);
+    expect(taskRunService.count(1, { status: 'success' })).toBe(1);
+  });
+
+  it('count returns total for a user/interest', () => {
+    taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.succeed(1, taskRunService.start(1, seedTaskId, seedInterestId));
+
+    expect(taskRunService.count(1)).toBe(3);
+    expect(taskRunService.count(1, { interestId: seedInterestId })).toBe(3);
   });
 });

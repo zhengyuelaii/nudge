@@ -38,6 +38,26 @@ describe('GET /api/updates', () => {
     const res = await app.request('/api/updates?interest_id=abc');
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.code).toBe('VALIDATION');
+    expect(body.code).toBe(400);
+  });
+
+  it('paginates with offset', async () => {
+    const row = db
+      .prepare('SELECT interest_id, task_run_id FROM "update" LIMIT 1')
+      .get() as { interest_id: number; task_run_id: number };
+    db.prepare(
+      `INSERT INTO "update" (user_id, interest_id, task_run_id, title, importance, created_at)
+       VALUES (1, ?, ?, ?, 8, '2026-08-19 08:00:00')`,
+    ).run(row.interest_id, row.task_run_id, '早期动态');
+
+    const page1 = await app.request('/api/updates?limit=1');
+    const b1 = await page1.json();
+    expect(b1.data).toHaveLength(1);
+    expect(b1.data[0].title).toBe('华友钴业营收创新高');
+
+    const page2 = await app.request('/api/updates?limit=1&offset=1');
+    const b2 = await page2.json();
+    expect(b2.data).toHaveLength(1);
+    expect(b2.data[0].title).toBe('早期动态');
   });
 });

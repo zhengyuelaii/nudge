@@ -108,7 +108,7 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
         );
         notifiedCount = toNotify.length;
       } catch (e) {
-        taskRunService.partial(userId, runId, 'notify_failed', e instanceof Error ? e : new Error(String(e)), analyzed.usage);
+        taskRunService.partial(userId, runId, 'notify_failed', e instanceof Error ? e : new Error(String(e)), analyzed.usage, created.length);
         return {
           runId,
           searchResultCount: results.length,
@@ -122,6 +122,7 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
   taskRunService.succeed(userId, runId, {
     searchQuery: interest.query_keywords ?? interest.name,
     searchResultCount: results.length,
+    updatesCreated: created.length,
     llmInputTokens: analyzed.usage.inputTokens,
     llmOutputTokens: analyzed.usage.outputTokens,
   });

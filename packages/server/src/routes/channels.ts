@@ -41,8 +41,8 @@ channels.post('/:id/test', async (c) => {
     return jsonOk(c, { ok: true, message: '测试消息已发送' });
   } catch (e) {
     if (e instanceof AppError) {
-      return jsonError(c, e.status, e.code, e.message);
+      return jsonError(c, e.status, e.message);
     }
-    return jsonError(c, 500, 'INTERNAL', '发送失败');
+    return jsonError(c, 500, '发送失败');
   }
 });

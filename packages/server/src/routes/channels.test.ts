@@ -67,7 +67,7 @@ describe('POST /api/notification-channels/:id/test', () => {
     const res = await app.request(`/api/notification-channels/${feishuId}/test`, { method: 'POST' });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.code).toBe('VALIDATION');
+    expect(body.code).toBe(400);
   });
 
   it('surfaces an error when the Feishu API rejects the message', async () => {
@@ -76,7 +76,7 @@ describe('POST /api/notification-channels/:id/test', () => {
     const res = await app.request(`/api/notification-channels/${feishuId}/test`, { method: 'POST' });
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error.message).toContain('19021');
+    expect(body.message).toContain('19021');
   });
 
   it('rejects unsupported channel types honestly', async () => {
@@ -84,6 +84,6 @@ describe('POST /api/notification-channels/:id/test', () => {
     const res = await app.request(`/api/notification-channels/${dingtalkId}/test`, { method: 'POST' });
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.message).toContain('不支持');
+    expect(body.message).toContain('不支持');
   });
 });

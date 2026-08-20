@@ -30,6 +30,7 @@ export interface ListUpdatesParams {
   since?: string;
   importance?: number;
   limit?: number;
+  offset?: number;
 }
 
 export const updateService = {
@@ -52,6 +53,7 @@ export const updateService = {
 
     const where = conditions.join(' AND ');
     const limit = params.limit ?? 50;
+    const offset = params.offset ?? 0;
 
     return db.prepare(`
       SELECT u.*, i.name AS interest_name, i.category AS interest_category
@@ -59,8 +61,8 @@ export const updateService = {
       LEFT JOIN interest i ON i.id = u.interest_id
       WHERE ${where}
       ORDER BY u.created_at DESC
-      LIMIT ?
-    `).all(...values, limit) as UpdateRow[];
+      LIMIT ? OFFSET ?
+    `).all(...values, limit, offset) as UpdateRow[];
   },
 
   get(userId: number, id: number): UpdateRow {

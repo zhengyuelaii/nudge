@@ -1,7 +1,7 @@
 -- ============================================================
 -- Nudge 初始化迁移 V20260818_001__init
 -- Target: SQLite 3.35+
--- 说明: 7 张表 + 索引 + 初始数据
+-- 说明: 8 张表 + 索引 + 初始数据
 --       所有业务/配置表预留 user_id（默认 1 = 默认用户），
 --       为后续多用户系统预留；schema_migration 为全局表不带 user_id。
 -- 执行前确保 PRAGMA foreign_keys = ON
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS task_run (
   duration_ms          INTEGER,
   search_query         TEXT,
   search_result_count  INTEGER,
+  updates_created_count INTEGER,
   llm_input_tokens     INTEGER,
   llm_output_tokens    INTEGER,
   llm_total_cost       REAL,
@@ -154,7 +155,22 @@ CREATE INDEX IF NOT EXISTS idx_channel_user_type ON notification_channel(user_id
 CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_user_default ON notification_channel(user_id) WHERE is_default = 1;
 
 -- ------------------------------------------------------------
--- 7. schema_migration — 迁移版本（全局，不带 user_id）
+-- 7. tag — 兴趣分类标签（分类元数据源）
+--    全局定义不带 user_id；interest.category 存 tag.code（文本）
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tag (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  code        TEXT NOT NULL UNIQUE,
+  label       TEXT NOT NULL,
+  color       TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ------------------------------------------------------------
+-- 8. schema_migration — 迁移版本（全局，不带 user_id）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schema_migration (
   version     TEXT PRIMARY KEY,
@@ -173,6 +189,14 @@ INSERT OR IGNORE INTO settings (user_id) VALUES (1);
 -- 默认飞书渠道占位（用户需填 config.webhook_url）
 INSERT OR IGNORE INTO notification_channel (user_id, type, name, config, enabled, is_default)
 VALUES (1, 'feishu', '默认飞书', '{"webhook_url":"","secret":""}', 0, 1);
+
+-- 默认标签种子（分类元数据；label/color 与前端 UI 一致）
+INSERT OR IGNORE INTO tag (code, label, color, sort_order) VALUES
+  ('company', '公司', 'bg-blue-100 text-blue-700', 1),
+  ('policy',  '政策', 'bg-amber-100 text-amber-700', 2),
+  ('tech',    '技术', 'bg-green-100 text-green-700', 3),
+  ('game',    '游戏', 'bg-purple-100 text-purple-700', 4),
+  ('finance', '财经', 'bg-blue-100 text-blue-700', 5);
 
 -- 记录本次迁移
 INSERT OR IGNORE INTO schema_migration (version, name) VALUES ('20260818_001', 'init schema');

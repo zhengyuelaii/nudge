@@ -2,16 +2,15 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 export function jsonOk<T>(c: Context, data: T, status: ContentfulStatusCode = 200) {
-  return c.json({ data }, status);
+  return c.json({ code: status, message: 'ok', data }, status);
 }
 
 export function jsonError(
   c: Context,
   status: ContentfulStatusCode,
-  code: string,
   message: string,
 ) {
-  return c.json({ error: { code, message } }, status);
+  return c.json({ code: status, message }, status);
 }
 
 export type OptionalInt =

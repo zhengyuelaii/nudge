@@ -5,6 +5,7 @@ import { channels } from './channels.js';
 import { interests } from './interests.js';
 import { updates } from './updates.js';
 import { taskRuns } from './task-runs.js';
+import { tags } from './tags.js';
 
 export const apiRoutes = new Hono();
 
@@ -14,3 +15,4 @@ apiRoutes.route('/notification-channels', channels);
 apiRoutes.route('/interests', interests);
 apiRoutes.route('/updates', updates);
 apiRoutes.route('/task-runs', taskRuns);
+apiRoutes.route('/tags', tags);

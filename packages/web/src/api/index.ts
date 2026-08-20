@@ -7,7 +7,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const json = await res.json();
   if (!res.ok) {
-    const msg = json?.error?.message ?? json?.message ?? `${res.status}`;
+    const msg = json?.message ?? `${res.status}`;
     throw new Error(msg);
   }
   return json.data as T;

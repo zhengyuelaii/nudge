@@ -31,10 +31,10 @@ describe('GET /api/task-runs', () => {
     const res = await app.request('/api/task-runs');
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data).toHaveLength(2);
-    expect(body.data[0].id).toBe(b);
-    expect(body.data[0].status).toBe('failed');
-    expect(body.data[0].interest_name).toBe('华友钴业');
+    expect(body.data.list).toHaveLength(2);
+    expect(body.data.list[0].id).toBe(b);
+    expect(body.data.list[0].status).toBe('failed');
+    expect(body.data.list[0].interest_name).toBe('华友钴业');
   });
 
   it('filters by interest_id query param', async () => {
@@ -55,14 +55,62 @@ describe('GET /api/task-runs', () => {
     const res = await app.request(`/api/task-runs?interest_id=${seedInterestId}`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data).toHaveLength(1);
-    expect(body.data[0].interest_id).toBe(seedInterestId);
+    expect(body.data.list).toHaveLength(1);
+    expect(body.data.list[0].interest_id).toBe(seedInterestId);
   });
 
   it('rejects invalid query params with 400', async () => {
     const res = await app.request('/api/task-runs?interest_id=abc');
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error.code).toBe('VALIDATION');
+    expect(body.code).toBe(400);
+  });
+
+  it('returns total count alongside data', async () => {
+    taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.start(1, seedTaskId, seedInterestId);
+
+    const res = await app.request('/api/task-runs');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.total).toBe(2);
+    expect(body.data.list).toHaveLength(2);
+  });
+
+  it('paginates with offset', async () => {
+    const ids = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      ids[i] = taskRunService.start(1, seedTaskId, seedInterestId);
+      taskRunService.succeed(1, ids[i]);
+    }
+
+    const res = await app.request(
+      `/api/task-runs?interest_id=${seedInterestId}&limit=2&offset=2`,
+    );
+    const body = await res.json();
+    expect(body.data.total).toBe(3);
+    expect(body.data.list).toHaveLength(1);
+    expect(body.data.list[0].id).toBe(ids[0]);
+  });
+
+  it('filters by status', async () => {
+    const ok = taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.succeed(1, ok);
+    const bad = taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.fail(1, bad, 'search_failed', new Error('boom'));
+
+    const res = await app.request(
+      `/api/task-runs?interest_id=${seedInterestId}&status=failed`,
+    );
+    const body = await res.json();
+    expect(body.data.total).toBe(1);
+    expect(body.data.list[0].id).toBe(bad);
+  });
+
+  it('rejects invalid status with 400', async () => {
+    const res = await app.request(`/api/task-runs?interest_id=${seedInterestId}&status=bogus`);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe(400);
   });
 });

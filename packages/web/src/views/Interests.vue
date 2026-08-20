@@ -2,6 +2,9 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api/index.js';
+import { useTags } from '../composables/useTags.js';
+
+const { tags, label, color } = useTags();
 
 const router = useRouter();
 
@@ -34,30 +37,6 @@ const form = ref({
   description: '',
   queryKeywords: '',
 });
-
-const categories: { key: string; label: string }[] = [
-  { key: 'company', label: '公司' },
-  { key: 'policy', label: '政策' },
-  { key: 'tech', label: '技术' },
-  { key: 'game', label: '游戏' },
-  { key: 'finance', label: '财经' },
-];
-
-const categoryColor: Record<string, string> = {
-  company: 'bg-blue-100 text-blue-700',
-  policy: 'bg-amber-100 text-amber-700',
-  tech: 'bg-green-100 text-green-700',
-  game: 'bg-purple-100 text-purple-700',
-  finance: 'bg-blue-100 text-blue-700',
-};
-
-const categoryLabel: Record<string, string> = {
-  company: '公司',
-  policy: '政策',
-  tech: '技术',
-  game: '游戏',
-  finance: '财经',
-};
 
 async function loadInterests() {
   loading.value = true;
@@ -137,8 +116,8 @@ function formatSchedule(item: Interest) {
           <div class="cursor-pointer truncate font-medium text-gray-900 hover:text-blue-600" @click="router.push(`/interests/${item.id}`)">{{ item.name }}</div>
           <div class="mt-0.5 flex items-center gap-2 text-xs text-gray-400">
             <span>{{ formatSchedule(item) }}</span>
-            <span class="rounded px-1.5 py-0.5 text-[11px]" :class="categoryColor[item.category]">
-              {{ categoryLabel[item.category] ?? item.category }}
+            <span class="rounded px-1.5 py-0.5 text-[11px]" :class="color(item.category)">
+              {{ label(item.category) }}
             </span>
           </div>
         </div>
@@ -178,15 +157,15 @@ function formatSchedule(item: Interest) {
               <label class="block text-sm font-medium text-gray-700 mb-1">分类</label>
               <div class="flex gap-2 mt-1">
                 <span
-                  v-for="cat in categories"
-                  :key="cat.key"
+                  v-for="cat in tags"
+                  :key="cat.code"
                   :class="[
                     'inline-flex items-center rounded-md px-2.5 py-0.5 text-sm border cursor-pointer transition-colors',
-                    form.category === cat.key
+                    form.category === cat.code
                       ? 'bg-gray-800 text-white border-gray-800'
                       : 'border-gray-300 text-gray-600 hover:bg-gray-50'
                   ]"
-                  @click="form.category = cat.key"
+                  @click="form.category = cat.code"
                 >
                   {{ cat.label }}
                 </span>
