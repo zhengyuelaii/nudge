@@ -29,7 +29,9 @@ export const updateSettingsSchema = z.object({
 });
 
 export const createChannelSchema = z.object({
-  type: z.enum(['feishu', 'dingtalk', 'email']),
+  // 钉钉推送暂时停用
+  // type: z.enum(['feishu', 'dingtalk', 'email']),
+  type: z.enum(['feishu', 'email']),
   name: z.string().min(1).max(100),
   config: z.record(z.unknown()),
   enabled: z.boolean().optional(),

@@ -25,9 +25,6 @@ interface Interest {
 const interests = ref<Interest[]>([]);
 const loading = ref(true);
 const showModal = ref(false);
-const showDeleteConfirm = ref(false);
-const editingId = ref<number | null>(null);
-const deletingId = ref<number | null>(null);
 
 const form = ref({
   name: '',
@@ -76,69 +73,26 @@ async function loadInterests() {
 onMounted(loadInterests);
 
 function openAdd() {
-  editingId.value = null;
   form.value = { name: '', category: 'tech', frequency: 'day', time: '09:00', description: '', queryKeywords: '' };
-  showModal.value = true;
-}
-
-function openEdit(item: Interest) {
-  editingId.value = item.id;
-  form.value = {
-    name: item.name,
-    category: item.category,
-    frequency: item.frequency,
-    time: item.time,
-    description: item.description ?? '',
-    queryKeywords: item.query_keywords ?? '',
-  };
   showModal.value = true;
 }
 
 async function save() {
   if (!form.value.name.trim()) return;
   try {
-    if (editingId.value !== null) {
-      await api.put(`/interests/${editingId.value}`, {
-        name: form.value.name,
-        category: form.value.category,
-        frequency: form.value.frequency,
-        time: form.value.time,
-        description: form.value.description || undefined,
-        queryKeywords: form.value.queryKeywords || undefined,
-      });
-    } else {
-      await api.post('/interests', {
-        name: form.value.name,
-        category: form.value.category,
-        frequency: form.value.frequency,
-        time: form.value.time,
-        description: form.value.description || undefined,
-        queryKeywords: form.value.queryKeywords || undefined,
-      });
-    }
+    await api.post('/interests', {
+      name: form.value.name,
+      category: form.value.category,
+      frequency: form.value.frequency,
+      time: form.value.time,
+      description: form.value.description || undefined,
+      queryKeywords: form.value.queryKeywords || undefined,
+    });
     await loadInterests();
     showModal.value = false;
   } catch (e: any) {
     alert('保存失败: ' + e.message);
   }
-}
-
-function confirmDelete(id: number) {
-  deletingId.value = id;
-  showDeleteConfirm.value = true;
-}
-
-async function doDelete() {
-  if (deletingId.value !== null) {
-    try {
-      await api.delete(`/interests/${deletingId.value}`);
-      await loadInterests();
-    } catch (e: any) {
-      alert('删除失败: ' + e.message);
-    }
-  }
-  showDeleteConfirm.value = false;
-  deletingId.value = null;
 }
 
 async function toggleEnabled(item: Interest) {
@@ -200,34 +154,16 @@ function formatSchedule(item: Interest) {
               :class="item.enabled ? 'translate-x-[14px]' : 'translate-x-0'"
             />
           </button>
-          <button
-            class="inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:text-gray-600"
-            title="编辑"
-            @click="openEdit(item)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
-            </svg>
-          </button>
-          <button
-            class="inline-flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:text-red-500"
-            title="删除"
-            @click="confirmDelete(item.id)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
-          </button>
         </div>
       </div>
     </div>
 
-    <!-- 添加/编辑弹窗 -->
+    <!-- 添加弹窗 -->
     <Teleport to="body">
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="absolute inset-0 bg-white/30 backdrop-blur-sm" @click="showModal = false"></div>
         <div class="relative bg-white rounded-lg p-6 w-[420px] shadow-lg border border-gray-200">
-          <h3 class="text-lg font-bold text-gray-900 mb-1">{{ editingId !== null ? '编辑兴趣' : '添加兴趣' }}</h3>
+          <h3 class="text-lg font-bold text-gray-900 mb-1">添加兴趣</h3>
           <p class="text-xs text-gray-500 mb-4">配置兴趣的基本信息和检查频率</p>
           <div class="space-y-4">
             <div>
@@ -298,31 +234,6 @@ function formatSchedule(item: Interest) {
               class="inline-flex items-center rounded-md bg-blue-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-50"
             >
               保存
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- 删除确认弹窗 -->
-    <Teleport to="body">
-      <div v-if="showDeleteConfirm" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-white/30 backdrop-blur-sm" @click="showDeleteConfirm = false"></div>
-        <div class="relative bg-white rounded-lg p-6 w-[340px] shadow-lg border border-gray-200">
-          <h3 class="text-lg font-bold text-gray-900 mb-1">确认删除</h3>
-          <p class="text-sm text-gray-500 mb-5">确定要删除这个兴趣吗？删除后无法恢复。</p>
-          <div class="flex justify-end gap-3">
-            <button
-              @click="showDeleteConfirm = false"
-              class="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-            >
-              取消
-            </button>
-            <button
-              @click="doDelete"
-              class="inline-flex items-center rounded-md bg-red-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-600"
-            >
-              删除
             </button>
           </div>
         </div>

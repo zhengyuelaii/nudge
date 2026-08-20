@@ -44,26 +44,32 @@ const search = reactive({ provider: 'tavily', apiKey: '' });
 const channels = ref<Channel[]>([]);
 
 const feishu = reactive({ webhookUrl: '', secret: '' });
-const dingtalk = reactive({ webhookUrl: '', secret: '' });
+// 钉钉推送暂时停用
+// const dingtalk = reactive({ webhookUrl: '', secret: '' });
 const email = reactive({ smtpHost: '', smtpPort: '465', from: '', password: '', to: '' });
 
 const testing = ref('');
-const testResult = ref('');
+const testResult: Record<string, string> = reactive({});
 
-async function sendTest() {
+const channelLabel: Record<string, string> = {
+  feishu: '飞书',
+  email: '邮件',
+};
+
+async function sendTest(type: string) {
   if (testing.value) return;
-  const ch = channels.value.find((c) => c.type === 'feishu');
+  const ch = channels.value.find((c) => c.type === type);
   if (!ch) {
-    testResult.value = '尚未保存飞书配置';
+    testResult[type] = `尚未保存${channelLabel[type] ?? type}配置`;
     return;
   }
-  testing.value = 'feishu';
-  testResult.value = '';
+  testing.value = type;
+  testResult[type] = '';
   try {
     const r = await api.post<{ message: string }>(`/notification-channels/${ch.id}/test`, {});
-    testResult.value = r.message ?? '发送成功';
+    testResult[type] = r.message ?? '发送成功';
   } catch (e: any) {
-    testResult.value = '发送失败: ' + e.message;
+    testResult[type] = '发送失败: ' + e.message;
   } finally {
     testing.value = '';
   }
@@ -76,9 +82,10 @@ function loadChannelConfig(type: string) {
   if (type === 'feishu') {
     feishu.webhookUrl = cfg.webhook_url ?? '';
     feishu.secret = cfg.secret ?? '';
-  } else if (type === 'dingtalk') {
-    dingtalk.webhookUrl = cfg.webhook_url ?? '';
-    dingtalk.secret = cfg.secret ?? '';
+    // 钉钉推送暂时停用
+    // } else if (type === 'dingtalk') {
+    //   dingtalk.webhookUrl = cfg.webhook_url ?? '';
+    //   dingtalk.secret = cfg.secret ?? '';
   } else if (type === 'email') {
     email.smtpHost = cfg.smtp_host ?? '';
     email.smtpPort = String(cfg.smtp_port ?? '465');
@@ -101,7 +108,7 @@ onMounted(async () => {
     search.apiKey = s.search_api_key ?? '';
     channels.value = chs;
     loadChannelConfig('feishu');
-    loadChannelConfig('dingtalk');
+    // loadChannelConfig('dingtalk');
     loadChannelConfig('email');
   } catch (e) {
     console.error('加载设置失败:', e);
@@ -123,7 +130,7 @@ async function save() {
 
     const saveChannel = async (type: string, config: Record<string, unknown>) => {
       const existing = channels.value.find((c) => c.type === type);
-      const body = { type, name: `${type === 'feishu' ? '飞书' : type === 'dingtalk' ? '钉钉' : '邮件'}`, config, enabled: true };
+      const body = { type, name: `${type === 'feishu' ? '飞书' : '邮件'}`, config, enabled: true };
       if (existing) {
         await api.put(`/notification-channels/${existing.id}`, { config, enabled: true });
       } else {
@@ -133,7 +140,7 @@ async function save() {
 
     await Promise.all([
       saveChannel('feishu', { webhook_url: feishu.webhookUrl, secret: feishu.secret }),
-      saveChannel('dingtalk', { webhook_url: dingtalk.webhookUrl, secret: dingtalk.secret }),
+      // saveChannel('dingtalk', { webhook_url: dingtalk.webhookUrl, secret: dingtalk.secret }),
       saveChannel('email', {
         smtp_host: email.smtpHost,
         smtp_port: Number(email.smtpPort),
@@ -209,13 +216,13 @@ async function save() {
                 <button
                   class="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
                   :disabled="testing !== ''"
-                  @click="sendTest"
+                  @click="sendTest('feishu')"
                 >
                   {{ testing === 'feishu' ? '发送中...' : '发送测试' }}
                 </button>
               </div>
-              <div v-if="testResult" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
-                {{ testResult }}
+              <div v-if="testResult.feishu" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
+                {{ testResult.feishu }}
               </div>
               <div class="space-y-4">
                 <div>
@@ -234,7 +241,8 @@ async function save() {
               </div>
             </div>
 
-            <div class="rounded border border-gray-200 bg-white p-5">
+            <!-- 钉钉推送暂时停用 -->
+            <!-- <div class="rounded border border-gray-200 bg-white p-5">
               <h3 class="mb-4 text-sm font-bold">钉钉</h3>
               <div class="space-y-4">
                 <div>
@@ -251,10 +259,22 @@ async function save() {
                   </div>
                 </div>
               </div>
-            </div>
+            </div> -->
 
             <div class="rounded border border-gray-200 bg-white p-5">
-              <h3 class="mb-4 text-sm font-bold">邮件</h3>
+              <div class="mb-4 flex items-center justify-between">
+                <h3 class="text-sm font-bold">邮件</h3>
+                <button
+                  class="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                  :disabled="testing !== ''"
+                  @click="sendTest('email')"
+                >
+                  {{ testing === 'email' ? '发送中...' : '发送测试' }}
+                </button>
+              </div>
+              <div v-if="testResult.email" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
+                {{ testResult.email }}
+              </div>
               <div class="space-y-4">
                 <div class="flex gap-3">
                   <div class="flex-1">

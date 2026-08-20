@@ -6,6 +6,7 @@ interface Update {
   id: number;
   title: string;
   source_name: string | null;
+  source_url: string | null;
   interest_category: string | null;
   interest_name: string | null;
   importance: number;
@@ -62,6 +63,11 @@ const filteredUpdates = computed(() => {
   if (activeCategory.value === 'all') return updates.value;
   return updates.value.filter((u) => u.interest_category === activeCategory.value);
 });
+
+function openOriginal(item: Update) {
+  if (!item.source_url) return;
+  window.open(item.source_url, '_blank', 'noopener');
+}
 </script>
 
 <template>
@@ -95,10 +101,13 @@ const filteredUpdates = computed(() => {
       <div
         v-for="item in filteredUpdates"
         :key="item.id"
-        class="flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-gray-50"
+        class="flex cursor-pointer flex-col gap-1 px-4 py-3 transition-colors hover:bg-gray-50"
+        :class="item.source_url ? '' : 'cursor-default'"
+        @click="openOriginal(item)"
       >
-        <div class="leading-snug">
+        <div class="flex items-start gap-1 leading-snug">
           <span class="font-medium text-gray-900">{{ item.title }}</span>
+          <span v-if="item.source_url" class="shrink-0 select-none text-xs text-gray-300">↗</span>
         </div>
         <div class="flex items-center gap-3 text-xs text-gray-400">
           <span>{{ item.source_name ?? '未知来源' }}</span>

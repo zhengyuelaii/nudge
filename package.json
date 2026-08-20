@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"pnpm:dev:*\"",
+    "dev": "node scripts/dev.mjs",
     "dev:server": "pnpm --filter @nudge/server dev",
     "dev:web": "pnpm --filter @nudge/web dev",
     "build": "pnpm --filter @nudge/shared build && pnpm --filter @nudge/server build && pnpm --filter @nudge/web build",

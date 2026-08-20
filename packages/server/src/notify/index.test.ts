@@ -1,10 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { signFeishu, sendFeishu, notify } from './index.js';
+import { signFeishu, sendFeishu, sendEmail, notify } from './index.js';
 
 const WEBHOOK =
   process.env.FEISHU_TEST_WEBHOOK ??
   'https://open.feishu.cn/open-apis/bot/v2/hook/test-webhook';
 const SECRET = process.env.FEISHU_TEST_SECRET ?? 'test-secret';
+
+const EMAIL_CONFIG = {
+  smtp_host: 'smtp.163.com',
+  smtp_port: 465,
+  from: 'qq951380562@163.com',
+  password: 'test-auth-code',
+  to: 'zhengyuelaii@foxmail.com',
+};
+
+function mockMailer() {
+  const mails: Array<Record<string, unknown>> = [];
+  const mailer = {
+    sendMail: async (mail: Record<string, unknown>) => {
+      mails.push(mail);
+    },
+  };
+  return { mailer, mails };
+}
 
 function mockFetch(json: unknown, status = 200): {
   impl: typeof fetch;
@@ -85,6 +103,46 @@ describe('sendFeishu', () => {
   });
 });
 
+describe('sendEmail', () => {
+  it('sends the text through the injected mailer', async () => {
+    const { mailer, mails } = mockMailer();
+
+    await sendEmail(EMAIL_CONFIG, '测试邮件正文', { mailer });
+
+    expect(mails).toHaveLength(1);
+    expect(mails[0]).toMatchObject({
+      from: 'qq951380562@163.com',
+      to: 'zhengyuelaii@foxmail.com',
+      subject: expect.any(String),
+      text: '测试邮件正文',
+    });
+  });
+
+  it('throws when the recipient is not configured', async () => {
+    const { mailer } = mockMailer();
+    const config = { ...EMAIL_CONFIG };
+    delete config.to;
+
+    await expect(sendEmail(config, 'x', { mailer })).rejects.toThrow('收件人');
+  });
+
+  it('throws when the sender is not configured', async () => {
+    const { mailer } = mockMailer();
+    const config = { ...EMAIL_CONFIG };
+    delete config.from;
+
+    await expect(sendEmail(config, 'x', { mailer })).rejects.toThrow('发件人');
+  });
+
+  it('throws when the SMTP host is not configured', async () => {
+    const { mailer } = mockMailer();
+    const config = { ...EMAIL_CONFIG };
+    delete config.smtp_host;
+
+    await expect(sendEmail(config, 'x', { mailer })).rejects.toThrow('SMTP');
+  });
+});
+
 describe('notify', () => {
   it('routes feishu channels to sendFeishu', async () => {
     const { impl, calls } = mockFetch({ code: 0, msg: 'success' });
@@ -103,12 +161,25 @@ describe('notify', () => {
     expect(body.content).toEqual({ text: 'hello' });
   });
 
+  it('routes email channels to sendEmail', async () => {
+    const { mailer, mails } = mockMailer();
+
+    await notify(
+      { type: 'email', config: JSON.stringify(EMAIL_CONFIG) },
+      'hello',
+      { mailer },
+    );
+
+    expect(mails).toHaveLength(1);
+    expect(mails[0].text).toBe('hello');
+  });
+
   it('throws for unsupported channel types', async () => {
     await expect(
       notify(
-        { type: 'email', config: JSON.stringify({}) },
+        { type: 'dingtalk', config: JSON.stringify({}) },
         'hello',
       ),
-    ).rejects.toThrow('不支持的渠道类型: email');
+    ).rejects.toThrow('不支持的渠道类型: dingtalk');
   });
 });

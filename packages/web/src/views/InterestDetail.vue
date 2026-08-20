@@ -119,6 +119,10 @@ function timeAgo(dateStr: string): string {
   return `${diffD}天前`;
 }
 
+function goBack() {
+  router.back();
+}
+
 async function loadData() {
   loading.value = true;
   try {
@@ -224,6 +228,16 @@ function formatSchedule(item: Interest) {
 
 <template>
   <div>
+    <button
+      class="mb-3 inline-flex cursor-pointer items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-800"
+      @click="goBack"
+    >
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+      </svg>
+      返回
+    </button>
+
     <div v-if="loading" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">加载中...</div>
 
     <template v-else-if="interest">
