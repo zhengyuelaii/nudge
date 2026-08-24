@@ -29,7 +29,7 @@ describe('search', () => {
     });
 
     const results = await search(
-      { name: '华友钴业', category: 'company' },
+      { name: '华友钴业', tags: ['company'] },
       { search_api_key: 'tvly-test-key' },
       { fetchImpl },
     );

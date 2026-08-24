@@ -37,11 +37,11 @@ export const settingsService = {
       const fields: string[] = [];
       const values: unknown[] = [];
 
-      if (input.aiBaseUrl !== undefined) { fields.push('ai_base_url = ?'); values.push(input.aiBaseUrl); }
-      if (input.aiApiKey !== undefined) { fields.push('ai_api_key = ?'); values.push(input.aiApiKey); }
-      if (input.aiModel !== undefined) { fields.push('ai_model = ?'); values.push(input.aiModel); }
-      if (input.searchProvider !== undefined) { fields.push('search_provider = ?'); values.push(input.searchProvider); }
-      if (input.searchApiKey !== undefined) { fields.push('search_api_key = ?'); values.push(input.searchApiKey); }
+      if (input.aiBaseUrl !== undefined) { fields.push('ai_base_url = ?'); values.push(input.aiBaseUrl || null); }
+      if (input.aiApiKey !== undefined) { fields.push('ai_api_key = ?'); values.push(input.aiApiKey || null); }
+      if (input.aiModel !== undefined) { fields.push('ai_model = ?'); values.push(input.aiModel || null); }
+      if (input.searchProvider !== undefined) { fields.push('search_provider = ?'); values.push(input.searchProvider || 'tavily'); }
+      if (input.searchApiKey !== undefined) { fields.push('search_api_key = ?'); values.push(input.searchApiKey || null); }
       if (input.notifyThreshold !== undefined) { fields.push('notify_threshold = ?'); values.push(input.notifyThreshold); }
       if (input.timezone !== undefined) { fields.push('timezone = ?'); values.push(input.timezone); }
 
@@ -57,11 +57,11 @@ export const settingsService = {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         userId,
-        input.aiBaseUrl ?? 'https://api.openai.com/v1',
-        input.aiApiKey ?? null,
-        input.aiModel ?? 'gpt-4o',
-        input.searchProvider ?? 'tavily',
-        input.searchApiKey ?? null,
+        input.aiBaseUrl || null,
+        input.aiApiKey || null,
+        input.aiModel || null,
+        input.searchProvider || 'tavily',
+        input.searchApiKey || null,
         input.timezone ?? 'Asia/Shanghai',
         input.notifyThreshold ?? 7,
       );

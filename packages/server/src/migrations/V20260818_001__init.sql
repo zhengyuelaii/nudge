@@ -1,7 +1,7 @@
 -- ============================================================
 -- Nudge 初始化迁移 V20260818_001__init
 -- Target: SQLite 3.35+
--- 说明: 8 张表 + 索引 + 初始数据
+-- 说明: 7 张表 + 索引 + 初始数据
 --       所有业务/配置表预留 user_id（默认 1 = 默认用户），
 --       为后续多用户系统预留；schema_migration 为全局表不带 user_id。
 -- 执行前确保 PRAGMA foreign_keys = ON
@@ -17,17 +17,17 @@ CREATE TABLE IF NOT EXISTS interest (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id         INTEGER NOT NULL DEFAULT 1,  -- 预留：默认用户=1
   name            TEXT    NOT NULL,
-  category        TEXT    NOT NULL,
+  tags            TEXT    NOT NULL DEFAULT '[]',
   description     TEXT,
   query_keywords  TEXT,
+  channel_ids     TEXT    NOT NULL DEFAULT '[]',  -- 选中的通知渠道 id 数组（JSON），空则回退默认渠道
   status          TEXT    NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active', 'archived')),
   created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_interest_user_status   ON interest(user_id, status);
-CREATE INDEX IF NOT EXISTS idx_interest_user_category ON interest(user_id, category);
+CREATE INDEX IF NOT EXISTS idx_interest_user_status ON interest(user_id, status);
 
 -- ------------------------------------------------------------
 -- 2. task — 调度任务 (1:1 interest)
@@ -122,10 +122,10 @@ CREATE INDEX IF NOT EXISTS idx_update_user_unread             ON "update"(user_i
 CREATE TABLE IF NOT EXISTS settings (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id           INTEGER NOT NULL DEFAULT 1,
-  ai_base_url       TEXT    DEFAULT 'https://api.openai.com/v1',
+  ai_base_url       TEXT,
   ai_api_key        TEXT,
-  ai_model          TEXT    DEFAULT 'gpt-4o',
-  search_provider   TEXT    NOT NULL DEFAULT 'tavily',
+  ai_model          TEXT,
+  search_provider   TEXT    DEFAULT 'tavily',
   search_api_key    TEXT,
   timezone          TEXT    NOT NULL DEFAULT 'Asia/Shanghai',
   notify_threshold  INTEGER NOT NULL DEFAULT 7 CHECK (notify_threshold BETWEEN 1 AND 10),
@@ -155,22 +155,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_user_type ON notification_channel(user_id
 CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_user_default ON notification_channel(user_id) WHERE is_default = 1;
 
 -- ------------------------------------------------------------
--- 7. tag — 兴趣分类标签（分类元数据源）
---    全局定义不带 user_id；interest.category 存 tag.code（文本）
--- ------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS tag (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  code        TEXT NOT NULL UNIQUE,
-  label       TEXT NOT NULL,
-  color       TEXT NOT NULL,
-  sort_order  INTEGER NOT NULL DEFAULT 0,
-  enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- ------------------------------------------------------------
--- 8. schema_migration — 迁移版本（全局，不带 user_id）
+-- 7. schema_migration — 迁移版本（全局，不带 user_id）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schema_migration (
   version     TEXT PRIMARY KEY,
@@ -186,17 +171,9 @@ CREATE TABLE IF NOT EXISTS schema_migration (
 -- 默认用户配置（单行）
 INSERT OR IGNORE INTO settings (user_id) VALUES (1);
 
--- 默认飞书渠道占位（用户需填 config.webhook_url）
+-- 飞书渠道占位（用户需填 config.webhook_url）；is_default=1 表示默认渠道，显示名不重复写"默认"
 INSERT OR IGNORE INTO notification_channel (user_id, type, name, config, enabled, is_default)
-VALUES (1, 'feishu', '默认飞书', '{"webhook_url":"","secret":""}', 0, 1);
-
--- 默认标签种子（分类元数据；label/color 与前端 UI 一致）
-INSERT OR IGNORE INTO tag (code, label, color, sort_order) VALUES
-  ('company', '公司', 'bg-blue-100 text-blue-700', 1),
-  ('policy',  '政策', 'bg-amber-100 text-amber-700', 2),
-  ('tech',    '技术', 'bg-green-100 text-green-700', 3),
-  ('game',    '游戏', 'bg-purple-100 text-purple-700', 4),
-  ('finance', '财经', 'bg-blue-100 text-blue-700', 5);
+VALUES (1, 'feishu', '飞书', '{"webhook_url":"","secret":""}', 0, 1);
 
 -- 记录本次迁移
 INSERT OR IGNORE INTO schema_migration (version, name) VALUES ('20260818_001', 'init schema');

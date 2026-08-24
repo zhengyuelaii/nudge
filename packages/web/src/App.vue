@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { RouterLink, RouterView, useRoute } from 'vue-router';
+import { Toaster } from '@/components/ui/sonner';
 
 const route = useRoute();
 </script>
 
 <template>
   <div class="min-h-screen bg-[#f5f5f5] text-gray-800" style="font-size: 13px; line-height: 1.6">
+    <Toaster />
     <header class="sticky top-0 z-50 border-b border-gray-200/50 bg-white/70 backdrop-blur-xl">
       <div class="mx-auto grid h-12 max-w-[900px] items-center px-4" style="grid-template-columns: 1fr auto 1fr">
         <RouterLink to="/" class="flex items-center justify-start">

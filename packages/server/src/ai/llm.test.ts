@@ -18,7 +18,7 @@ function mockModelWithJson(json: unknown) {
 
 const interest = {
   name: '华友钴业',
-  category: 'company',
+  tags: ['company'],
   query_keywords: '华友钴业 股价 最新',
 };
 

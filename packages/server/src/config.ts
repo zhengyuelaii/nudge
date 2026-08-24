@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-
-const SERVER_ROOT = resolve(import.meta.dirname, '..');
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 export const config = {
   port: Number(process.env.PORT ?? 8787),
-  dbPath: process.env.DB_PATH ?? join(SERVER_ROOT, 'data', 'nudge.db'),
+  dbPath: process.env.DB_PATH ?? join(homedir(), '.nudge', 'data', 'nudge.db'),
   isDev: process.env.NODE_ENV !== 'production',
   schedulerEnabled: process.env.NUDGE_SCHEDULER !== 'off',
 } as const;

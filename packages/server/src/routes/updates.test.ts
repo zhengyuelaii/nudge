@@ -6,8 +6,8 @@ beforeEach(() => {
   db.exec('DELETE FROM "update"; DELETE FROM task_run; DELETE FROM task; DELETE FROM interest;');
 
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-    .run('华友钴业', 'company');
+    .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+    .run('华友钴业', '["company"]');
   const interestId = Number(interest.lastInsertRowid);
   const task = db
     .prepare(
@@ -59,5 +59,21 @@ describe('GET /api/updates', () => {
     const b2 = await page2.json();
     expect(b2.data).toHaveLength(1);
     expect(b2.data[0].title).toBe('早期动态');
+  });
+
+  it('excludes updates from archived interests', async () => {
+    const archived = db
+      .prepare("INSERT INTO interest (user_id, name, tags, status) VALUES (1, ?, ?, 'archived')")
+      .run('游戏行业政策', '["policy"]');
+    const archivedId = Number(archived.lastInsertRowid);
+    db.prepare(
+      `INSERT INTO "update" (user_id, interest_id, title, importance, created_at)
+       VALUES (1, ?, '版号发放', 7, '2026-08-19 10:00:00')`,
+    ).run(archivedId);
+
+    const res = await app.request('/api/updates');
+    const body = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].title).toBe('华友钴业营收创新高');
   });
 });

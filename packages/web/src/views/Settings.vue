@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
+import { watchDebounced } from '@vueuse/core';
 import { api } from '../api/index.js';
+import { toast } from 'vue-sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type Tab = 'ai' | 'push' | 'search';
 
 const activeTab = ref<Tab>('ai');
 const loading = ref(true);
-const saving = ref(false);
+// loaded = 数据已从后端填充完成，之后才允许 autosave，避免初始赋值触发空保存
+const loaded = ref(false);
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+const saveState = ref<SaveState>('idle');
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'ai', label: 'AI 配置' },
@@ -15,7 +26,6 @@ const tabs: { key: Tab; label: string }[] = [
 ];
 
 const showKey: Record<string, boolean> = reactive({});
-
 function toggleKey(key: string) {
   showKey[key] = !showKey[key];
 }
@@ -26,8 +36,6 @@ interface Settings {
   ai_model: string | null;
   search_provider: string;
   search_api_key: string | null;
-  timezone: string;
-  notify_threshold: number;
 }
 
 interface Channel {
@@ -41,12 +49,11 @@ interface Channel {
 
 const ai = reactive({ baseUrl: '', apiKey: '', model: '' });
 const search = reactive({ provider: 'tavily', apiKey: '' });
-const channels = ref<Channel[]>([]);
-
 const feishu = reactive({ webhookUrl: '', secret: '' });
-// 钉钉推送暂时停用
-// const dingtalk = reactive({ webhookUrl: '', secret: '' });
 const email = reactive({ smtpHost: '', smtpPort: '465', from: '', password: '', to: '' });
+
+// 已存在渠道 id：有则 PUT 更新，无则 POST 创建并记下 id，避免重复创建
+const channelId: Record<string, number> = {};
 
 const testing = ref('');
 const testResult: Record<string, string> = reactive({});
@@ -56,37 +63,38 @@ const channelLabel: Record<string, string> = {
   email: '邮件',
 };
 
-async function sendTest(type: string) {
-  if (testing.value) return;
-  const ch = channels.value.find((c) => c.type === type);
-  if (!ch) {
-    testResult[type] = `尚未保存${channelLabel[type] ?? type}配置`;
-    return;
+const saveStateText = computed(() => {
+  switch (saveState.value) {
+    case 'saving':
+      return '保存中…';
+    case 'saved':
+      return '已保存';
+    case 'error':
+      return '保存失败';
+    default:
+      return '';
   }
-  testing.value = type;
-  testResult[type] = '';
-  try {
-    const r = await api.post<{ message: string }>(`/notification-channels/${ch.id}/test`, {});
-    testResult[type] = r.message ?? '发送成功';
-  } catch (e: any) {
-    testResult[type] = '发送失败: ' + e.message;
-  } finally {
-    testing.value = '';
-  }
-}
+});
 
-function loadChannelConfig(type: string) {
-  const ch = channels.value.find((c) => c.type === type);
-  if (!ch) return;
-  const cfg = JSON.parse(ch.config);
-  if (type === 'feishu') {
+const saveStateClass = computed(() => {
+  switch (saveState.value) {
+    case 'saving':
+      return 'text-gray-400';
+    case 'saved':
+      return 'text-green-500';
+    case 'error':
+      return 'text-red-500';
+    default:
+      return '';
+  }
+});
+
+function loadChannelConfig(c: Channel) {
+  const cfg = JSON.parse(c.config);
+  if (c.type === 'feishu') {
     feishu.webhookUrl = cfg.webhook_url ?? '';
     feishu.secret = cfg.secret ?? '';
-    // 钉钉推送暂时停用
-    // } else if (type === 'dingtalk') {
-    //   dingtalk.webhookUrl = cfg.webhook_url ?? '';
-    //   dingtalk.secret = cfg.secret ?? '';
-  } else if (type === 'email') {
+  } else if (c.type === 'email') {
     email.smtpHost = cfg.smtp_host ?? '';
     email.smtpPort = String(cfg.smtp_port ?? '465');
     email.from = cfg.from ?? '';
@@ -101,47 +109,59 @@ onMounted(async () => {
       api.get<Settings>('/settings'),
       api.get<Channel[]>('/notification-channels'),
     ]);
-    ai.baseUrl = s.ai_base_url ?? 'https://api.openai.com/v1';
+    ai.baseUrl = s.ai_base_url ?? '';
     ai.apiKey = s.ai_api_key ?? '';
-    ai.model = s.ai_model ?? 'gpt-4o';
+    ai.model = s.ai_model ?? '';
     search.provider = s.search_provider;
     search.apiKey = s.search_api_key ?? '';
-    channels.value = chs;
-    loadChannelConfig('feishu');
-    // loadChannelConfig('dingtalk');
-    loadChannelConfig('email');
+    chs.forEach((c) => {
+      channelId[c.type] = c.id;
+      loadChannelConfig(c);
+    });
   } catch (e) {
     console.error('加载设置失败:', e);
+    toast.error('加载设置失败');
   } finally {
     loading.value = false;
+    loaded.value = true;
   }
 });
 
-async function save() {
-  saving.value = true;
-  try {
-    await api.put('/settings', {
-      aiBaseUrl: ai.baseUrl || undefined,
-      aiApiKey: ai.apiKey || undefined,
-      aiModel: ai.model || undefined,
-      searchProvider: search.provider,
-      searchApiKey: search.apiKey || undefined,
+async function persistSettings() {
+  await api.put('/settings', {
+    aiBaseUrl: ai.baseUrl || '',
+    aiApiKey: ai.apiKey || '',
+    aiModel: ai.model || '',
+    searchProvider: search.provider || 'tavily',
+    searchApiKey: search.apiKey || '',
+  });
+}
+
+async function persistChannel(type: string, config: Record<string, unknown>) {
+  const id = channelId[type];
+  if (id) {
+    await api.put(`/notification-channels/${id}`, { config, enabled: true });
+  } else {
+    const created = await api.post<Channel>('/notification-channels', {
+      type,
+      name: type === 'feishu' ? '飞书' : '邮件',
+      config,
+      enabled: true,
     });
+    channelId[type] = created.id;
+  }
+}
 
-    const saveChannel = async (type: string, config: Record<string, unknown>) => {
-      const existing = channels.value.find((c) => c.type === type);
-      const body = { type, name: `${type === 'feishu' ? '飞书' : '邮件'}`, config, enabled: true };
-      if (existing) {
-        await api.put(`/notification-channels/${existing.id}`, { config, enabled: true });
-      } else {
-        await api.post('/notification-channels', body);
-      }
-    };
-
+// 保存全部：settings + 两个渠道。autosave 与「发送测试」共用，保证测试前数据已落库。
+// 成功静默（不显示"已保存"），仅在失败时提示；autosave 持续失败不重复弹 toast。
+async function saveAll() {
+  if (!loaded.value) return;
+  const wasError = saveState.value === 'error';
+  try {
+    await persistSettings();
     await Promise.all([
-      saveChannel('feishu', { webhook_url: feishu.webhookUrl, secret: feishu.secret }),
-      // saveChannel('dingtalk', { webhook_url: dingtalk.webhookUrl, secret: dingtalk.secret }),
-      saveChannel('email', {
+      persistChannel('feishu', { webhook_url: feishu.webhookUrl, secret: feishu.secret }),
+      persistChannel('email', {
         smtp_host: email.smtpHost,
         smtp_port: Number(email.smtpPort),
         from: email.from,
@@ -150,21 +170,47 @@ async function save() {
         use_tls: true,
       }),
     ]);
-
-    const chs = await api.get<Channel[]>('/notification-channels');
-    channels.value = chs;
+    saveState.value = 'idle';
   } catch (e: any) {
-    alert('保存失败: ' + e.message);
+    saveState.value = 'error';
+    // 仅在状态从正常变失败时弹一次 toast，避免 autosave 持续失败反复打扰
+    if (!wasError) toast.error('保存失败: ' + e.message);
+  }
+}
+
+// 内容变化自动保存：debounce 600ms，避免连续输入时频繁请求
+watchDebounced(() => ({ ai, search, feishu, email }), () => saveAll(), {
+  debounce: 600,
+  deep: true,
+});
+
+async function sendTest(type: string) {
+  if (testing.value) return;
+  // 测试前先 flush 最新值，确保后端测试用的是当前输入
+  await saveAll();
+  const id = channelId[type];
+  if (!id) {
+    testResult[type] = `尚未保存${channelLabel[type] ?? type}配置`;
+    return;
+  }
+  testing.value = type;
+  testResult[type] = '';
+  try {
+    const r = await api.post<{ message: string }>(`/notification-channels/${id}/test`, {});
+    testResult[type] = r.message ?? '发送成功';
+  } catch (e: any) {
+    testResult[type] = '发送失败: ' + e.message;
   } finally {
-    saving.value = false;
+    testing.value = '';
   }
 }
 </script>
 
 <template>
   <div>
-    <div class="mb-3 border-b border-gray-200 pb-2">
+    <div class="mb-3 flex items-center justify-between border-b border-gray-200 pb-2">
       <h2 class="text-base font-bold">设置</h2>
+      <span v-if="saveStateText" class="text-xs" :class="saveStateClass">{{ saveStateText }}</span>
     </div>
 
     <div v-if="loading" class="p-8 text-center text-sm text-gray-400">加载中...</div>
@@ -184,162 +230,145 @@ async function save() {
 
       <div class="min-w-0 flex-1">
         <template v-if="activeTab === 'ai'">
-          <div class="rounded border border-gray-200 bg-white p-5">
-            <h3 class="mb-4 text-sm font-bold">AI 配置</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">请求地址</label>
-                <input v-model="ai.baseUrl" type="text" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">API Key</label>
-                <div class="relative">
-                  <input v-model="ai.apiKey" :type="showKey.ai ? 'text' : 'password'" placeholder="sk-..." class="w-full rounded border border-gray-300 px-3 py-1.5 pr-16 text-sm outline-none focus:border-gray-500" />
-                  <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('ai')">
-                    {{ showKey.ai ? '隐藏' : '显示' }}
-                  </button>
+          <Card>
+            <CardHeader>
+              <CardTitle>AI 配置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div class="space-y-4">
+                <div class="space-y-2">
+                  <Label>请求地址</Label>
+                  <Input v-model="ai.baseUrl" type="text" placeholder="https://api.deepseek.com" />
+                </div>
+                <div class="space-y-2">
+                  <Label>API Key</Label>
+                  <div class="relative">
+                    <Input v-model="ai.apiKey" :type="showKey.ai ? 'text' : 'password'" placeholder="sk-..." class="pr-16" />
+                    <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('ai')">
+                      {{ showKey.ai ? '隐藏' : '显示' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <Label>模型</Label>
+                  <Input v-model="ai.model" type="text" placeholder="deepseek-chat" />
                 </div>
               </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">模型</label>
-                <input v-model="ai.model" type="text" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
-              </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </template>
 
         <template v-if="activeTab === 'push'">
           <div class="space-y-4">
-            <div class="rounded border border-gray-200 bg-white p-5">
-              <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-sm font-bold">飞书</h3>
-                <button
-                  class="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
-                  :disabled="testing !== ''"
-                  @click="sendTest('feishu')"
-                >
-                  {{ testing === 'feishu' ? '发送中...' : '发送测试' }}
-                </button>
-              </div>
-              <div v-if="testResult.feishu" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
-                {{ testResult.feishu }}
-              </div>
-              <div class="space-y-4">
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">Webhook URL</label>
-                  <input v-model="feishu.webhookUrl" type="text" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
+            <Card>
+              <CardHeader>
+                <CardTitle>飞书</CardTitle>
+                <CardAction>
+                  <Button variant="outline" size="sm" :disabled="testing !== ''" @click="sendTest('feishu')">
+                    {{ testing === 'feishu' ? '发送中...' : '发送测试' }}
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <div v-if="testResult.feishu" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
+                  {{ testResult.feishu }}
                 </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">签名密钥（可选）</label>
-                  <div class="relative">
-                    <input v-model="feishu.secret" :type="showKey.feishu ? 'text' : 'password'" placeholder="留空则不验签" class="w-full rounded border border-gray-300 px-3 py-1.5 pr-16 text-sm outline-none focus:border-gray-500" />
-                    <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('feishu')">
-                      {{ showKey.feishu ? '隐藏' : '显示' }}
-                    </button>
+                <div class="space-y-4">
+                  <div class="space-y-2">
+                    <Label>Webhook URL</Label>
+                    <Input v-model="feishu.webhookUrl" type="text" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
+                  </div>
+                  <div class="space-y-2">
+                    <Label>签名密钥（可选）</Label>
+                    <div class="relative">
+                      <Input v-model="feishu.secret" :type="showKey.feishu ? 'text' : 'password'" placeholder="留空则不验签" class="pr-16" />
+                      <button class="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('feishu')">
+                        {{ showKey.feishu ? '隐藏' : '显示' }}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
 
-            <!-- 钉钉推送暂时停用 -->
-            <!-- <div class="rounded border border-gray-200 bg-white p-5">
-              <h3 class="mb-4 text-sm font-bold">钉钉</h3>
-              <div class="space-y-4">
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">Webhook URL</label>
-                  <input v-model="dingtalk.webhookUrl" type="text" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
+            <Card>
+              <CardHeader>
+                <CardTitle>邮件</CardTitle>
+                <CardAction>
+                  <Button variant="outline" size="sm" :disabled="testing !== ''" @click="sendTest('email')">
+                    {{ testing === 'email' ? '发送中...' : '发送测试' }}
+                  </Button>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <div v-if="testResult.email" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
+                  {{ testResult.email }}
                 </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">签名密钥（可选）</label>
-                  <div class="relative">
-                    <input v-model="dingtalk.secret" :type="showKey.dingtalk ? 'text' : 'password'" placeholder="SEC..." class="w-full rounded border border-gray-300 px-3 py-1.5 pr-16 text-sm outline-none focus:border-gray-500" />
-                    <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('dingtalk')">
-                      {{ showKey.dingtalk ? '隐藏' : '显示' }}
-                    </button>
+                <div class="space-y-4">
+                  <div class="flex gap-3">
+                    <div class="flex-1 space-y-2">
+                      <Label>SMTP 服务器</Label>
+                      <Input v-model="email.smtpHost" type="text" placeholder="smtp.qq.com" />
+                    </div>
+                    <div class="w-24 space-y-2">
+                      <Label>端口</Label>
+                      <Input v-model="email.smtpPort" type="text" />
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <Label>发件人邮箱</Label>
+                    <Input v-model="email.from" type="email" placeholder="your@email.com" />
+                  </div>
+                  <div class="space-y-2">
+                    <Label>授权码</Label>
+                    <div class="relative">
+                      <Input v-model="email.password" :type="showKey.email ? 'text' : 'password'" placeholder="邮箱授权码（非登录密码）" class="pr-16" />
+                      <button class="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('email')">
+                        {{ showKey.email ? '隐藏' : '显示' }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <Label>收件人邮箱</Label>
+                    <Input v-model="email.to" type="email" placeholder="receiver@email.com" />
                   </div>
                 </div>
-              </div>
-            </div> -->
-
-            <div class="rounded border border-gray-200 bg-white p-5">
-              <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-sm font-bold">邮件</h3>
-                <button
-                  class="rounded border border-gray-300 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
-                  :disabled="testing !== ''"
-                  @click="sendTest('email')"
-                >
-                  {{ testing === 'email' ? '发送中...' : '发送测试' }}
-                </button>
-              </div>
-              <div v-if="testResult.email" class="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
-                {{ testResult.email }}
-              </div>
-              <div class="space-y-4">
-                <div class="flex gap-3">
-                  <div class="flex-1">
-                    <label class="mb-1 block text-xs text-gray-500">SMTP 服务器</label>
-                    <input v-model="email.smtpHost" type="text" placeholder="smtp.qq.com" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
-                  </div>
-                  <div class="w-24">
-                    <label class="mb-1 block text-xs text-gray-500">端口</label>
-                    <input v-model="email.smtpPort" type="text" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
-                  </div>
-                </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">发件人邮箱</label>
-                  <input v-model="email.from" type="email" placeholder="your@email.com" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
-                </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">授权码</label>
-                  <div class="relative">
-                    <input v-model="email.password" :type="showKey.email ? 'text' : 'password'" placeholder="邮箱授权码（非登录密码）" class="w-full rounded border border-gray-300 px-3 py-1.5 pr-16 text-sm outline-none focus:border-gray-500" />
-                    <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('email')">
-                      {{ showKey.email ? '隐藏' : '显示' }}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label class="mb-1 block text-xs text-gray-500">收件人邮箱</label>
-                  <input v-model="email.to" type="email" placeholder="receiver@email.com" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500" />
-                </div>
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           </div>
         </template>
 
         <template v-if="activeTab === 'search'">
-          <div class="rounded border border-gray-200 bg-white p-5">
-            <h3 class="mb-4 text-sm font-bold">搜索配置</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">搜索提供商</label>
-                <select v-model="search.provider" class="w-full rounded border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-gray-500">
-                  <option value="tavily">Tavily</option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1 block text-xs text-gray-500">API Key</label>
-                <div class="relative">
-                  <input v-model="search.apiKey" :type="showKey.search ? 'text' : 'password'" placeholder="tvly-..." class="w-full rounded border border-gray-300 px-3 py-1.5 pr-16 text-sm outline-none focus:border-gray-500" />
-                  <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('search')">
-                    {{ showKey.search ? '隐藏' : '显示' }}
-                  </button>
+          <Card>
+            <CardHeader>
+              <CardTitle>搜索配置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div class="space-y-4">
+                <div class="space-y-2">
+                  <Label>搜索提供商</Label>
+                  <Select v-model="search.provider">
+                    <SelectTrigger class="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tavily">Tavily</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div class="space-y-2">
+                  <Label>API Key</Label>
+                  <div class="relative">
+                    <Input v-model="search.apiKey" :type="showKey.search ? 'text' : 'password'" placeholder="tvly-..." class="pr-16" />
+                    <button class="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('search')">
+                      {{ showKey.search ? '隐藏' : '显示' }}
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </template>
-
-        <div class="mt-4 flex justify-end">
-          <button
-            class="rounded bg-gray-800 px-4 py-1.5 text-xs text-white transition-colors hover:bg-gray-700 disabled:opacity-50"
-            :disabled="saving"
-            @click="save"
-          >
-            {{ saving ? '保存中...' : '保存' }}
-          </button>
-        </div>
       </div>
     </div>
   </div>

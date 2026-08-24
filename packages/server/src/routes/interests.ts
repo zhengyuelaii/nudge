@@ -5,12 +5,20 @@ import { interestService } from '../services/interest.service.js';
 import { jsonOk, jsonError } from '../lib/http.js';
 import { runCheck } from '../scheduler/check.js';
 import { Errors } from '../lib/errors.js';
+import { db } from '../db/client.js';
 
 export const interests = new Hono();
 
 interests.get('/', (c) => {
   const data = interestService.list(1);
   return jsonOk(c, data);
+});
+
+interests.get('/tags', (c) => {
+  const rows = db
+    .prepare("SELECT DISTINCT value FROM interest, json_each(interest.tags) WHERE user_id = 1 AND status = 'active' ORDER BY value")
+    .all() as { value: string }[];
+  return jsonOk(c, rows.map((r) => r.value));
 });
 
 interests.post('/', zValidator('json', createInterestSchema), (c) => {

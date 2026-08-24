@@ -10,8 +10,8 @@ beforeEach(() => {
   db.exec('DELETE FROM task_run; DELETE FROM task; DELETE FROM interest;');
 
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-    .run('华友钴业', 'company');
+    .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+    .run('华友钴业', '["company"]');
   seedInterestId = Number(interest.lastInsertRowid);
   const task = db
     .prepare(
@@ -39,8 +39,8 @@ describe('GET /api/task-runs', () => {
 
   it('filters by interest_id query param', async () => {
     const other = db
-      .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-      .run('苹果 Vision Pro', 'tech');
+      .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+      .run('苹果 Vision Pro', '["tech"]');
     const otherInterestId = Number(other.lastInsertRowid);
     const otherTask = db
       .prepare(

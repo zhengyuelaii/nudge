@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api/index.js';
-import { useTags } from '../composables/useTags.js';
-
-const { tags, label, color } = useTags();
+import CategoryInput from '../components/CategoryInput.vue';
+import { toast } from 'vue-sonner';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 const router = useRouter();
 
 interface Interest {
   id: number;
   name: string;
-  category: string;
+  tags: string[];
   description: string | null;
   query_keywords: string | null;
   status: string;
@@ -25,18 +39,40 @@ interface Interest {
   next_run_at: string | null;
 }
 
+interface Channel {
+  id: number;
+  type: string;
+  name: string;
+  enabled: number;
+  is_default: number;
+}
+
 const interests = ref<Interest[]>([]);
 const loading = ref(true);
 const showModal = ref(false);
+const existingCategories = ref<string[]>([]);
+const channels = ref<Channel[]>([]);
+const saving = ref(false);
+const submitAttempted = ref(false);
 
 const form = ref({
   name: '',
-  category: 'tech' as string,
+  tags: [] as string[],
   frequency: 'day' as 'day' | 'week',
   time: '09:00',
   description: '',
   queryKeywords: '',
+  channelIds: [] as number[],
 });
+
+const formErrors = computed<{ name?: string; tags?: string; time?: string }>(() => {
+  const e: { name?: string; tags?: string; time?: string } = {};
+  if (!form.value.name.trim()) e.name = '请输入兴趣名称';
+  if (form.value.tags.length === 0) e.tags = '请至少添加一个分类';
+  if (!form.value.time || !/^\d{2}:\d{2}$/.test(form.value.time)) e.time = '请选择有效的执行时间';
+  return e;
+});
+const hasErrors = computed(() => Object.keys(formErrors.value).length > 0);
 
 async function loadInterests() {
   loading.value = true;
@@ -51,26 +87,46 @@ async function loadInterests() {
 
 onMounted(loadInterests);
 
+async function loadCategories() {
+  try {
+    existingCategories.value = await api.get<string[]>('/interests/tags');
+  } catch { /* ignore */ }
+}
+
+async function loadChannels() {
+  try {
+    channels.value = await api.get<Channel[]>('/notification-channels');
+  } catch { /* ignore */ }
+}
+
 function openAdd() {
-  form.value = { name: '', category: 'tech', frequency: 'day', time: '09:00', description: '', queryKeywords: '' };
+  form.value = { name: '', tags: [], frequency: 'day', time: '09:00', description: '', queryKeywords: '', channelIds: [] };
+  submitAttempted.value = false;
   showModal.value = true;
+  void loadCategories();
+  void loadChannels();
 }
 
 async function save() {
-  if (!form.value.name.trim()) return;
+  submitAttempted.value = true;
+  if (hasErrors.value) return;
+  saving.value = true;
   try {
     await api.post('/interests', {
       name: form.value.name,
-      category: form.value.category,
+      tags: form.value.tags,
       frequency: form.value.frequency,
       time: form.value.time,
       description: form.value.description || undefined,
       queryKeywords: form.value.queryKeywords || undefined,
+      channelIds: form.value.channelIds,
     });
     await loadInterests();
     showModal.value = false;
   } catch (e: any) {
-    alert('保存失败: ' + e.message);
+    toast.error('保存失败: ' + e.message);
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -79,7 +135,7 @@ async function toggleEnabled(item: Interest) {
     await api.put(`/interests/${item.id}/toggle`);
     await loadInterests();
   } catch (e: any) {
-    alert('切换失败: ' + e.message);
+    toast.error('切换失败: ' + e.message);
   }
 }
 
@@ -92,12 +148,7 @@ function formatSchedule(item: Interest) {
   <div>
     <div class="mb-4 flex items-center justify-between border-b border-gray-200 pb-2">
       <h2 class="text-base font-bold">兴趣</h2>
-      <button
-        @click="openAdd"
-        class="inline-flex items-center rounded-md bg-blue-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-600"
-      >
-        + 添加兴趣
-      </button>
+      <Button @click="openAdd">+ 添加兴趣</Button>
     </div>
 
     <div v-if="loading" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">加载中...</div>
@@ -116,107 +167,91 @@ function formatSchedule(item: Interest) {
           <div class="cursor-pointer truncate font-medium text-gray-900 hover:text-blue-600" @click="router.push(`/interests/${item.id}`)">{{ item.name }}</div>
           <div class="mt-0.5 flex items-center gap-2 text-xs text-gray-400">
             <span>{{ formatSchedule(item) }}</span>
-            <span class="rounded px-1.5 py-0.5 text-[11px]" :class="color(item.category)">
-              {{ label(item.category) }}
-            </span>
+            <template v-if="item.tags.length > 0">
+              <span class="text-gray-300">|</span>
+              <Badge v-for="tag in item.tags" :key="tag" variant="outline">{{ tag }}</Badge>
+            </template>
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-1">
-          <button
-            class="relative h-[18px] w-[32px] shrink-0 rounded-full transition-colors duration-200"
-            :class="item.enabled ? 'bg-green-500' : 'bg-gray-300'"
-            :title="item.enabled ? '已启用' : '已禁用'"
-            @click="toggleEnabled(item)"
-          >
-            <span
-              class="absolute left-[2px] top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-transform duration-200"
-              :class="item.enabled ? 'translate-x-[14px]' : 'translate-x-0'"
-            />
-          </button>
+          <Switch
+            :model-value="!!item.enabled"
+            @update:model-value="toggleEnabled(item)"
+          />
         </div>
       </div>
     </div>
 
-    <!-- 添加弹窗 -->
-    <Teleport to="body">
-      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center">
-        <div class="absolute inset-0 bg-white/30 backdrop-blur-sm" @click="showModal = false"></div>
-        <div class="relative bg-white rounded-lg p-6 w-[420px] shadow-lg border border-gray-200">
-          <h3 class="text-lg font-bold text-gray-900 mb-1">添加兴趣</h3>
-          <p class="text-xs text-gray-500 mb-4">配置兴趣的基本信息和检查频率</p>
-          <div class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">兴趣名称</label>
-              <input
-                v-model="form.name"
-                placeholder="输入兴趣描述..."
-                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
+    <Dialog :open="showModal" @update:open="showModal = $event">
+      <DialogContent class="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>添加兴趣</DialogTitle>
+          <DialogDescription>配置兴趣的基本信息和检查频率</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-2">
+          <div class="space-y-2">
+            <Label>兴趣名称</Label>
+            <Input v-model="form.name" placeholder="输入兴趣描述..." :aria-invalid="submitAttempted && !!formErrors.name" />
+            <p v-if="submitAttempted && formErrors.name" class="text-xs text-red-500">{{ formErrors.name }}</p>
+          </div>
+          <div class="space-y-2">
+            <Label>分类</Label>
+            <CategoryInput
+              v-model="form.tags"
+              :suggestions="existingCategories"
+              placeholder="选择或新建分类"
+            />
+            <p v-if="submitAttempted && formErrors.tags" class="text-xs text-red-500">{{ formErrors.tags }}</p>
+          </div>
+          <div class="space-y-2">
+            <Label>搜索关键词（可选）</Label>
+            <Input v-model="form.queryKeywords" placeholder="留空则使用名称" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label>检查频率</Label>
+              <Select v-model="form.frequency">
+                <SelectTrigger class="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="day">每天</SelectItem>
+                  <SelectItem value="week">每周</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">分类</label>
-              <div class="flex gap-2 mt-1">
-                <span
-                  v-for="cat in tags"
-                  :key="cat.code"
-                  :class="[
-                    'inline-flex items-center rounded-md px-2.5 py-0.5 text-sm border cursor-pointer transition-colors',
-                    form.category === cat.code
-                      ? 'bg-gray-800 text-white border-gray-800'
-                      : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                  ]"
-                  @click="form.category = cat.code"
-                >
-                  {{ cat.label }}
-                </span>
-              </div>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">搜索关键词（可选）</label>
-              <input
-                v-model="form.queryKeywords"
-                placeholder="留空则使用名称"
-                class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">检查频率</label>
-                <select
-                  v-model="form.frequency"
-                  class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="day">每天</option>
-                  <option value="week">每周</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">执行时间</label>
-                <input
-                  v-model="form.time"
-                  type="time"
-                  class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
+            <div class="space-y-2">
+              <Label>执行时间</Label>
+              <Input v-model="form.time" type="time" :aria-invalid="submitAttempted && !!formErrors.time" />
+              <p v-if="submitAttempted && formErrors.time" class="text-xs text-red-500">{{ formErrors.time }}</p>
             </div>
           </div>
-          <div class="flex justify-end gap-3 mt-5">
-            <button
-              @click="showModal = false"
-              class="inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50"
-            >
-              取消
-            </button>
-            <button
-              @click="save"
-              :disabled="form.name.trim() === ''"
-              class="inline-flex items-center rounded-md bg-blue-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-50"
-            >
-              保存
-            </button>
+          <div class="space-y-2">
+            <Label>备注</Label>
+            <Textarea v-model="form.description" rows="2" />
+          </div>
+          <div class="space-y-2">
+            <Label>推送渠道</Label>
+            <div v-if="channels.length === 0" class="text-xs text-gray-400">暂无可用渠道，请先在设置页配置通知渠道</div>
+            <div v-else class="flex flex-row flex-wrap gap-x-5 gap-y-2">
+              <label
+                v-for="ch in channels"
+                :key="ch.id"
+                class="flex items-center gap-2 text-sm"
+                :class="ch.enabled ? '' : 'opacity-50'"
+              >
+                <input type="checkbox" :value="ch.id" v-model="form.channelIds" class="h-4 w-4" />
+                <span>{{ ch.name }}</span>
+                <span v-if="!ch.enabled" class="text-xs text-gray-400">（未启用）</span>
+              </label>
+            </div>
           </div>
         </div>
-      </div>
-    </Teleport>
+        <DialogFooter>
+          <Button variant="outline" @click="showModal = false">取消</Button>
+          <Button :disabled="saving" @click="save">保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

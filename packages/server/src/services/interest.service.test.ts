@@ -7,8 +7,8 @@ let seedTaskId = 0;
 
 function seed(): void {
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-    .run('华友钴业', 'company');
+    .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+    .run('华友钴业', '["company"]');
   seedInterestId = Number(interest.lastInsertRowid);
   const task = db
     .prepare(
@@ -48,5 +48,62 @@ describe('interestService.markTaskRun', () => {
 
   it('throws when the task does not exist', () => {
     expect(() => interestService.markTaskRun(1, 999, { advanceNext: false })).toThrow('任务不存在');
+  });
+});
+
+describe('interestService channel_ids', () => {
+  let chFeishuId = 0;
+  let chEmailId = 0;
+
+  beforeEach(() => {
+    db.exec('DELETE FROM notification_channel;');
+    const feishu = db
+      .prepare(
+        "INSERT INTO notification_channel (user_id, type, name, config, enabled, is_default) VALUES (1, 'feishu', '飞书A', '{}', 1, 1)",
+      )
+      .run();
+    const email = db
+      .prepare(
+        "INSERT INTO notification_channel (user_id, type, name, config, enabled, is_default) VALUES (1, 'email', '邮件B', '{}', 1, 0)",
+      )
+      .run();
+    chFeishuId = Number(feishu.lastInsertRowid);
+    chEmailId = Number(email.lastInsertRowid);
+  });
+
+  it('persists channelIds on create and reads them back', () => {
+    const created = interestService.create(1, {
+      name: '渠道测试兴趣',
+      tags: ['t1'],
+      frequency: 'day',
+      time: '09:00',
+      channelIds: [chFeishuId],
+    });
+    expect(created.channelIds).toEqual([chFeishuId]);
+  });
+
+  it('updates channelIds via update', () => {
+    interestService.update(1, seedInterestId, { channelIds: [chFeishuId, chEmailId] });
+    const got = interestService.get(1, seedInterestId);
+    expect(got.channelIds).toEqual([chFeishuId, chEmailId]);
+  });
+
+  it('getNotifyChannels returns picked enabled channels', () => {
+    interestService.update(1, seedInterestId, { channelIds: [chFeishuId, chEmailId] });
+    const chs = interestService.getNotifyChannels(1, seedInterestId);
+    expect(chs.map((c) => c.id).sort((a, b) => a - b)).toEqual([chFeishuId, chEmailId]);
+  });
+
+  it('getNotifyChannels falls back to default when channel_ids is empty', () => {
+    const chs = interestService.getNotifyChannels(1, seedInterestId);
+    expect(chs.map((c) => c.id)).toEqual([chFeishuId]);
+  });
+
+  it('getNotifyChannels falls back to default when picked channels are all disabled', () => {
+    db.prepare('UPDATE notification_channel SET enabled = 0, is_default = 0 WHERE id = ?').run(chFeishuId);
+    db.prepare('UPDATE notification_channel SET enabled = 1, is_default = 1 WHERE id = ?').run(chEmailId);
+    interestService.update(1, seedInterestId, { channelIds: [chFeishuId] });
+    const chs = interestService.getNotifyChannels(1, seedInterestId);
+    expect(chs.map((c) => c.id)).toEqual([chEmailId]);
   });
 });

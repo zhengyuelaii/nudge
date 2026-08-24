@@ -2,9 +2,8 @@
 import { ref, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { api } from '../api/index.js';
-import { useTags } from '../composables/useTags.js';
-
-const { label, color } = useTags();
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface Interest {
   id: number;
@@ -17,7 +16,7 @@ interface Update {
   summary: string | null;
   source_name: string | null;
   source_url: string | null;
-  interest_category: string | null;
+  interest_tags: string[];
   importance: number;
   has_progress: number;
   published_at: string | null;
@@ -32,10 +31,10 @@ const updates = ref<Update[]>([]);
 const loadingInterests = ref(true);
 const loadingUpdates = ref(false);
 
-const importanceBadge = (n: number) => {
-  if (n >= 8) return 'bg-red-100 text-red-700';
-  if (n >= 6) return 'bg-amber-100 text-amber-700';
-  return 'bg-gray-100 text-gray-500';
+const importanceBadgeVariant = (n: number): 'destructive' | 'default' | 'secondary' => {
+  if (n >= 8) return 'destructive';
+  if (n >= 6) return 'default';
+  return 'secondary';
 };
 
 function timeAgo(dateStr: string): string {
@@ -57,6 +56,8 @@ onMounted(async () => {
     const qid = Number(route.query.interest_id);
     if (qid && interests.value.some((i) => i.id === qid)) {
       selectedInterestId.value = qid;
+    } else if (interests.value.length > 0) {
+      selectedInterestId.value = interests.value[0].id;
     }
   } catch (e) {
     console.error('加载兴趣失败:', e);
@@ -82,15 +83,16 @@ watch(selectedInterestId, async (id) => {
   <div>
     <div class="mb-3 border-b border-gray-200 pb-2">
       <h2 class="mb-2 text-base font-bold">动态</h2>
-      <select
-        v-model="selectedInterestId"
-        class="w-full rounded border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-500"
-      >
-        <option :value="null" disabled>选择一个兴趣点...</option>
-        <option v-for="item in interests" :key="item.id" :value="item.id">
-          {{ item.name }}
-        </option>
-      </select>
+      <Select v-model="selectedInterestId">
+        <SelectTrigger class="w-full">
+          <SelectValue placeholder="选择一个兴趣点..." />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="item in interests" :key="item.id" :value="item.id">
+            {{ item.name }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
     </div>
 
     <div v-if="!selectedInterestId" class="border border-gray-200 bg-white p-12 text-center text-sm text-gray-400">
@@ -121,12 +123,12 @@ watch(selectedInterestId, async (id) => {
         <div class="min-w-0 flex-1 pb-1">
           <div class="mb-1 flex items-center gap-2">
             <span class="text-xs text-gray-400">{{ timeAgo(item.created_at) }}</span>
-            <span class="rounded px-1.5 py-0.5 text-[11px]" :class="importanceBadge(item.importance)">
+            <Badge :variant="importanceBadgeVariant(item.importance)">
               {{ item.importance }}分
-            </span>
-            <span v-if="item.has_progress" class="rounded bg-green-100 px-1.5 py-0.5 text-[11px] text-green-700">
+            </Badge>
+            <Badge v-if="item.has_progress" variant="secondary" class="text-green-700">
               有进展
-            </span>
+            </Badge>
           </div>
           <h3 class="text-sm font-medium leading-snug text-gray-900">{{ item.title }}</h3>
           <div v-if="item.summary" class="mt-1 text-xs leading-relaxed text-gray-500">{{ item.summary }}</div>
@@ -134,10 +136,6 @@ watch(selectedInterestId, async (id) => {
             <span>{{ item.source_name ?? '未知来源' }}</span>
             <span v-if="item.source_url" class="text-gray-300">|</span>
             <a v-if="item.source_url" :href="item.source_url" target="_blank" class="text-blue-500 hover:underline">原文</a>
-            <span v-if="item.interest_category" class="text-gray-300">|</span>
-            <span v-if="item.interest_category" class="rounded px-1.5 py-0.5 text-[11px]" :class="color(item.interest_category)">
-              {{ label(item.interest_category) }}
-            </span>
           </div>
         </div>
       </div>

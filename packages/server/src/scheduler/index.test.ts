@@ -7,8 +7,8 @@ let otherTaskId = 0;
 
 function seedTask(enabled: number, nextRun: string | null): number {
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-    .run('华友钴业', 'company');
+    .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+    .run('华友钴业', '["company"]');
   const interestId = Number(interest.lastInsertRowid);
   const task = db
     .prepare(

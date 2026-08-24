@@ -3,6 +3,11 @@ import { Errors } from '../lib/errors.js';
 import { nowUtc } from '../lib/time.js';
 import { hashContent } from '../lib/hash.js';
 
+function parseTags(raw: string | null): string[] {
+  if (!raw) return [];
+  try { return JSON.parse(raw) as string[]; } catch { return []; }
+}
+
 export interface UpdateRow {
   id: number;
   user_id: number;
@@ -22,7 +27,7 @@ export interface UpdateRow {
   created_at: string;
   updated_at: string;
   interest_name?: string;
-  interest_category?: string;
+  interest_tags?: string[];
 }
 
 export interface ListUpdatesParams {
@@ -55,25 +60,26 @@ export const updateService = {
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
 
-    return db.prepare(`
-      SELECT u.*, i.name AS interest_name, i.category AS interest_category
+    const rows = db.prepare(`
+      SELECT u.*, i.name AS interest_name, i.tags AS interest_tags
       FROM "update" u
-      LEFT JOIN interest i ON i.id = u.interest_id
+      INNER JOIN interest i ON i.id = u.interest_id AND i.status = 'active'
       WHERE ${where}
       ORDER BY u.created_at DESC
       LIMIT ? OFFSET ?
-    `).all(...values, limit, offset) as UpdateRow[];
+    `).all(...values, limit, offset) as (Omit<UpdateRow, 'interest_tags'> & { interest_tags: string | null })[];
+    return rows.map((r) => ({ ...r, interest_tags: parseTags(r.interest_tags) }));
   },
 
   get(userId: number, id: number): UpdateRow {
     const row = db.prepare(`
-      SELECT u.*, i.name AS interest_name, i.category AS interest_category
+      SELECT u.*, i.name AS interest_name, i.tags AS interest_tags
       FROM "update" u
       LEFT JOIN interest i ON i.id = u.interest_id
       WHERE u.id = ? AND u.user_id = ?
-    `).get(id, userId) as UpdateRow | undefined;
+    `).get(id, userId) as (Omit<UpdateRow, 'interest_tags'> & { interest_tags: string | null }) | undefined;
     if (!row) throw Errors.notFound('更新记录不存在');
-    return row;
+    return { ...row, interest_tags: parseTags(row.interest_tags) };
   },
 
   markRead(userId: number, id: number): void {

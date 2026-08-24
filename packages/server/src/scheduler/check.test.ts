@@ -20,8 +20,8 @@ let seedTaskId = 0;
 
 function seed(): void {
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category, query_keywords) VALUES (1, ?, ?, ?)')
-    .run('华友钴业', 'company', '华友钴业 股价 最新');
+    .prepare('INSERT INTO interest (user_id, name, tags, query_keywords) VALUES (1, ?, ?, ?)')
+    .run('华友钴业', '["company"]', '华友钴业 股价 最新');
   seedInterestId = Number(interest.lastInsertRowid);
   const task = db
     .prepare(
@@ -36,7 +36,7 @@ function seed(): void {
 
   db.prepare(
     `INSERT INTO notification_channel (user_id, type, name, config, enabled, is_default)
-     VALUES (1, 'feishu', '默认飞书', '{"webhook_url":"https://open.feishu.cn/open-apis/bot/v2/hook/test","secret":""}', 1, 1)`,
+     VALUES (1, 'feishu', '飞书', '{"webhook_url":"https://open.feishu.cn/open-apis/bot/v2/hook/test","secret":""}', 1, 1)`,
   ).run();
 }
 
@@ -177,8 +177,8 @@ describe('runCheck', () => {
 
   it('writes the failure for the task owner, not user 1, when user_id is not 1', async () => {
     const otherInterest = db
-      .prepare('INSERT INTO interest (user_id, name, category) VALUES (2, ?, ?)')
-      .run('苹果 Vision Pro', 'tech');
+      .prepare('INSERT INTO interest (user_id, name, tags) VALUES (2, ?, ?)')
+      .run('苹果 Vision Pro', '["tech"]');
     const otherInterestId = Number(otherInterest.lastInsertRowid);
     const otherTask = db
       .prepare(
@@ -234,5 +234,74 @@ describe('runCheck', () => {
       .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
       .get() as any;
     expect(update.is_notified).toBe(0);
+  });
+
+  it('notifies across multiple picked channels', async () => {
+    const defId = (db.prepare('SELECT id FROM notification_channel WHERE is_default = 1 LIMIT 1').get() as { id: number }).id;
+    const ch2 = db
+      .prepare(
+        "INSERT INTO notification_channel (user_id, type, name, config, enabled, is_default) VALUES (1, 'feishu', '飞书B', '{\"webhook_url\":\"https://other.feishu.cn/hook/x\",\"secret\":\"\"}', 1, 0)",
+      )
+      .run();
+    const ch2Id = Number(ch2.lastInsertRowid);
+    db.prepare('UPDATE interest SET channel_ids = ? WHERE id = ?').run(
+      JSON.stringify([defId, ch2Id]),
+      seedInterestId,
+    );
+
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+      'open.feishu.cn': { code: 0, msg: 'success' },
+      'other.feishu.cn': { code: 0, msg: 'success' },
+    });
+    const model = mockModel({
+      elements: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 9 }],
+    });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(result.createdCount).toBe(1);
+    expect(result.notifiedCount).toBe(2); // 两个渠道各通知一次
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('success');
+    const update = db
+      .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
+      .get() as any;
+    expect(update.is_notified).toBe(1);
+  });
+
+  it('marks partial when one of multiple channels fails', async () => {
+    const defId = (db.prepare('SELECT id FROM notification_channel WHERE is_default = 1 LIMIT 1').get() as { id: number }).id;
+    const ch2 = db
+      .prepare(
+        "INSERT INTO notification_channel (user_id, type, name, config, enabled, is_default) VALUES (1, 'feishu', '飞书B', '{\"webhook_url\":\"https://other.feishu.cn/hook/x\",\"secret\":\"\"}', 1, 0)",
+      )
+      .run();
+    const ch2Id = Number(ch2.lastInsertRowid);
+    db.prepare('UPDATE interest SET channel_ids = ? WHERE id = ?').run(
+      JSON.stringify([defId, ch2Id]),
+      seedInterestId,
+    );
+
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+      'open.feishu.cn': { code: 0, msg: 'success' },
+      'other.feishu.cn': { code: 19021, msg: 'sign fail' },
+    });
+    const model = mockModel({
+      elements: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 9 }],
+    });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(result.createdCount).toBe(1);
+    expect(result.notifiedCount).toBe(1); // 仅一个渠道成功
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('partial');
+    expect(run.error_type).toBe('notify_failed');
+    const update = db
+      .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
+      .get() as any;
+    expect(update.is_notified).toBe(1); // 成功渠道已发出 → 标记已通知
   });
 });

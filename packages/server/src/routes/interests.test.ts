@@ -18,8 +18,8 @@ beforeEach(() => {
   db.exec('DELETE FROM task_run; DELETE FROM task; DELETE FROM interest;');
 
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-    .run('华友钴业', 'company');
+    .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+    .run('华友钴业', '["company"]');
   seedInterestId = Number(interest.lastInsertRowid);
   const task = db
     .prepare(
@@ -52,5 +52,35 @@ describe('POST /api/interests/:id/check', () => {
   it('returns 404 when the interest does not exist', async () => {
     const res = await app.request('/api/interests/999/check', { method: 'POST' });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /api/interests/tags', () => {
+  it('returns distinct tags from interests', async () => {
+    db.prepare("INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)").run('苹果', '["tech"]');
+    db.prepare("INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)").run('谷歌', '["tech"]');
+    db.prepare("INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)").run('特斯拉', '["company"]');
+
+    const res = await app.request('/api/interests/tags');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.sort()).toEqual(['company', 'tech']);
+  });
+
+  it('returns empty array when no interests exist', async () => {
+    db.exec('DELETE FROM interest;');
+    const res = await app.request('/api/interests/tags');
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+  });
+
+  it('excludes tags from archived interests', async () => {
+    db.exec('DELETE FROM interest;');
+    db.prepare("INSERT INTO interest (user_id, name, tags, status) VALUES (1, ?, ?, 'active')").run('苹果', '["tech"]');
+    db.prepare("INSERT INTO interest (user_id, name, tags, status) VALUES (1, ?, ?, 'archived')").run('游戏行业政策', '["policy"]');
+
+    const res = await app.request('/api/interests/tags');
+    const body = await res.json();
+    expect(body.data).toEqual(['tech']);
   });
 });

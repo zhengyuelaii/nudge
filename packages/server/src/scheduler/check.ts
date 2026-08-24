@@ -3,10 +3,9 @@ import { interestService } from '../services/interest.service.js';
 import { settingsService } from '../services/settings.service.js';
 import { taskRunService, type RunErrorType } from '../services/task-run.service.js';
 import { updateService, type UpdateRow } from '../services/update.service.js';
-import { channelService } from '../services/channel.service.js';
 import { search, type SearchResult } from '../ai/search.js';
 import { analyze } from '../ai/llm.js';
-import { notify } from '../notify/index.js';
+import { notify, type Mailer } from '../notify/index.js';
 
 export interface CheckResult {
   runId: number;
@@ -18,6 +17,7 @@ export interface CheckResult {
 export interface CheckOptions {
   fetchImpl?: typeof fetch;
   model?: LanguageModel;
+  mailer?: Mailer;
 }
 
 const KNOWN_STATE_LIMIT = 5;
@@ -96,26 +96,32 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
   let notifiedCount = 0;
 
   if (toNotify.length > 0) {
-    const channel = channelService.getDefault(userId);
-    if (channel) {
+    const channels = interestService.getNotifyChannels(userId, interest.id);
+    const notifyErrors: { name: string; error: Error }[] = [];
+    for (const channel of channels) {
       try {
         await notify(channel, buildNotifyText(interest, toNotify), {
           fetchImpl: opts.fetchImpl,
+          mailer: opts.mailer,
         });
-        updateService.markNotified(
-          userId,
-          toNotify.map((u) => u.id),
-        );
-        notifiedCount = toNotify.length;
+        notifiedCount += toNotify.length;
       } catch (e) {
-        taskRunService.partial(userId, runId, 'notify_failed', e instanceof Error ? e : new Error(String(e)), analyzed.usage, created.length);
-        return {
-          runId,
-          searchResultCount: results.length,
-          createdCount: created.length,
-          notifiedCount: 0,
-        };
+        notifyErrors.push({ name: channel.name, error: e instanceof Error ? e : new Error(String(e)) });
       }
+    }
+    if (notifiedCount > 0) {
+      updateService.markNotified(userId, toNotify.map((u) => u.id));
+    }
+    if (notifyErrors.length > 0) {
+      taskRunService.partial(
+        userId,
+        runId,
+        'notify_failed',
+        new Error(`通知失败渠道: ${notifyErrors.map((f) => f.name).join(', ')}`),
+        analyzed.usage,
+        created.length,
+      );
+      return { runId, searchResultCount: results.length, createdCount: created.length, notifiedCount };
     }
   }
 

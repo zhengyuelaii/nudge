@@ -6,8 +6,8 @@ let seedInterestId = 0;
 
 function seed(): void {
   const interest = db
-    .prepare('INSERT INTO interest (user_id, name, category) VALUES (1, ?, ?)')
-    .run('华友钴业', 'company');
+    .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
+    .run('华友钴业', '["company"]');
   seedInterestId = Number(interest.lastInsertRowid);
 }
 
@@ -90,5 +90,31 @@ describe('updateService.markNotified', () => {
     expect(notified.notified_at).toBeTruthy();
     expect(untouched.is_notified).toBe(0);
     expect(untouched.notified_at).toBeNull();
+  });
+});
+
+describe('updateService.list — archived interest filtering', () => {
+  it('excludes updates from archived interests', () => {
+    const archived = db
+      .prepare("INSERT INTO interest (user_id, name, tags, status) VALUES (1, ?, ?, 'archived')")
+      .run('游戏行业政策', '["policy"]');
+    const archivedId = Number(archived.lastInsertRowid);
+
+    db.prepare(
+      `INSERT INTO "update" (user_id, interest_id, title, importance) VALUES (1, ?, '版号发放', 7)`,
+    ).run(archivedId);
+
+    const rows = updateService.list(1);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('still returns updates from active interests', () => {
+    db.prepare(
+      `INSERT INTO "update" (user_id, interest_id, title, importance) VALUES (1, ?, '华友钴业营收创新高', 8)`,
+    ).run(seedInterestId);
+
+    const rows = updateService.list(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].interest_tags).toEqual(['company']);
   });
 });

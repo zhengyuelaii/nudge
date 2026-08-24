@@ -1,15 +1,17 @@
 import { db, transaction } from '../db/client.js';
 import { Errors } from '../lib/errors.js';
 import { nowUtc, computeNextRun } from '../lib/time.js';
+import { channelService, type ChannelRow } from './channel.service.js';
 import type { CreateInterestInput, UpdateInterestInput } from '../lib/zod.js';
 
 export interface InterestRow {
   id: number;
   user_id: number;
   name: string;
-  category: string;
+  tags: string[];
   description: string | null;
   query_keywords: string | null;
+  channelIds: number[];
   status: string;
   created_at: string;
   updated_at: string;
@@ -35,6 +37,22 @@ export interface TaskRow {
 }
 
 const DEFAULT_USER_ID = 1;
+
+function parseTags(raw: string): string[] {
+  try { return JSON.parse(raw) as string[]; } catch { return []; }
+}
+
+function parseChannelIds(raw: unknown): number[] {
+  if (typeof raw !== 'string' || raw.trim() === '') return [];
+  try {
+    const arr = JSON.parse(raw) as unknown[];
+    return Array.isArray(arr)
+      ? arr.filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 function userTimezone(userId: number): string {
   const row = db
@@ -62,28 +80,33 @@ const GET_SQL = `
 
 export const interestService = {
   list(userId = DEFAULT_USER_ID): InterestRow[] {
-    return db.prepare(LIST_SQL).all(userId) as InterestRow[];
+    const rows = db.prepare(LIST_SQL).all(userId) as (Omit<InterestRow, 'tags' | 'channelIds'> & { tags: string; channel_ids: string })[];
+    return rows.map((r) => {
+      const { tags, channel_ids, ...rest } = r;
+      return { ...rest, tags: parseTags(tags), channelIds: parseChannelIds(channel_ids) };
+    });
   },
 
   get(userId: number, id: number): InterestRow {
-    const row = db.prepare(GET_SQL).get(id, userId) as InterestRow | undefined;
+    const row = db.prepare(GET_SQL).get(id, userId) as (Omit<InterestRow, 'tags' | 'channelIds'> & { tags: string; channel_ids: string }) | undefined;
     if (!row) throw Errors.notFound('兴趣不存在');
-    return row;
+    return { ...row, tags: parseTags(row.tags), channelIds: parseChannelIds(row.channel_ids) };
   },
 
   create(userId: number, input: CreateInterestInput): InterestRow {
     return transaction(() => {
       const result = db
         .prepare(
-          `INSERT INTO interest (user_id, name, category, description, query_keywords)
-           VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO interest (user_id, name, tags, description, query_keywords, channel_ids)
+           VALUES (?, ?, ?, ?, ?, ?)`,
         )
         .run(
           userId,
           input.name,
-          input.category,
+          JSON.stringify(input.tags),
           input.description ?? null,
           input.queryKeywords ?? null,
+          JSON.stringify(input.channelIds ?? []),
         );
 
       const interestId = Number(result.lastInsertRowid);
@@ -106,9 +129,10 @@ export const interestService = {
       const iValues: unknown[] = [];
 
       if (input.name !== undefined) { iFields.push('name = ?'); iValues.push(input.name); }
-      if (input.category !== undefined) { iFields.push('category = ?'); iValues.push(input.category); }
+      if (input.tags !== undefined) { iFields.push('tags = ?'); iValues.push(JSON.stringify(input.tags)); }
       if (input.description !== undefined) { iFields.push('description = ?'); iValues.push(input.description); }
       if (input.queryKeywords !== undefined) { iFields.push('query_keywords = ?'); iValues.push(input.queryKeywords); }
+      if (input.channelIds !== undefined) { iFields.push('channel_ids = ?'); iValues.push(JSON.stringify(input.channelIds)); }
 
       if (iFields.length > 0) {
         iFields.push('updated_at = ?');
@@ -163,6 +187,23 @@ export const interestService = {
 
       return interestService.get(userId, id);
     });
+  },
+
+  getNotifyChannels(userId: number, interestId: number): ChannelRow[] {
+    const interest = interestService.get(userId, interestId);
+    const ids = interest.channelIds;
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(',');
+      const picked = db
+        .prepare(
+          `SELECT * FROM notification_channel WHERE user_id = ? AND id IN (${placeholders}) AND enabled = 1`,
+        )
+        .all(userId, ...ids) as ChannelRow[];
+      // 选中的渠道全部被删/禁用时回退默认渠道，保证仍可能收到通知
+      if (picked.length > 0) return picked;
+    }
+    const def = channelService.getDefault(userId);
+    return def ? [def] : [];
   },
 
   remove(userId: number, id: number): void {

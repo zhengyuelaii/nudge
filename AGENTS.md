@@ -28,13 +28,12 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 ## Server 布局
 
-`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = search → LLM 分析 → 写 updates → notify → 记 task_run）、`ai/` search+llm、`notify/` 飞书+邮件、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/updates` `/task-runs` `/tags`。
+`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = search → LLM 分析 → 写 updates → notify → 记 task_run）、`ai/` search+llm、`notify/` 飞书+邮件、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/updates` `/task-runs`。
 
 ## SQLite / 迁移
 
 - **无迁移框架**。单一幂等文件 `migrations/V20260818_001__init.sql` 每次启动 `CREATE TABLE IF NOT EXISTS`。SQLite 的 `ADD COLUMN` 无 `IF NOT EXISTS`，**新增列必须在代码里 guard** —— 见 `db/client.ts`（`PRAGMA table_info(...)` 后条件 `ALTER TABLE`）。明确决定不引入迁移 runner。
 - `"update"` 是 SQL 保留字，SQL 里始终双引号。
-- `tag` 表是分类元数据源（种子 5 条：company/policy/tech/game/finance，label+color+sort_order），`interest.category` 存 `tag.code` 文本；`GET /api/tags` 供前端 `composables/useTags.ts` 使用（前端禁止再硬编码分类数组/颜色映射）。
 - DB 落在 `packages/server/data/nudge.db`，`DB_PATH` 可覆盖；测试强制 `DB_PATH=:memory:`，故改表结构必须同步进 init 文件测试才可见。
 
 ## Scheduler

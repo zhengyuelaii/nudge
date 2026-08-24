@@ -2,30 +2,36 @@ import { z } from 'zod';
 
 export const createInterestSchema = z.object({
   name: z.string().min(1).max(200),
-  category: z.enum(['company', 'policy', 'tech', 'game', 'finance']),
+  tags: z.array(z.string().min(1).max(50)).min(1).max(10),
   description: z.string().optional(),
   queryKeywords: z.string().optional(),
   frequency: z.enum(['day', 'week']),
   time: z.string().regex(/^\d{2}:\d{2}$/),
+  channelIds: z.array(z.number().int().positive()).optional(),
 });
 
 export const updateInterestSchema = z.object({
   name: z.string().min(1).max(200).optional(),
-  category: z.enum(['company', 'policy', 'tech', 'game', 'finance']).optional(),
+  tags: z.array(z.string().min(1).max(50)).min(1).max(10).optional(),
   description: z.string().optional(),
   queryKeywords: z.string().optional(),
   frequency: z.enum(['day', 'week']).optional(),
   time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  channelIds: z.array(z.number().int().positive()).optional(),
 });
 
 export const updateSettingsSchema = z.object({
-  aiBaseUrl: z.string().url().optional(),
-  aiApiKey: z.string().optional(),
-  aiModel: z.string().optional(),
-  searchProvider: z.string().optional(),
-  searchApiKey: z.string().optional(),
+  // .nullable() 兼容前端用 null 表示"留空/清空"的语义（service 层 `|| null` 统一转 NULL 存库）。
+  // 字符串字段同时接受 string | null | undefined，避免前端发 null 被 zod 拒绝 → 400。
+  // aiBaseUrl 不做 .url() 校验：autosave 下用户输入是流式的，URL 中间态（"http"、"https://..."）
+  // 必然非合法 URL，逐字符 400 会持续报错；URL 最终可不可用在 AI 调用时验证，后端不替用户卡语法。
+  aiBaseUrl: z.string().nullable().optional(),
+  aiApiKey: z.string().nullable().optional(),
+  aiModel: z.string().nullable().optional(),
+  searchProvider: z.string().nullable().optional(),
+  searchApiKey: z.string().nullable().optional(),
   notifyThreshold: z.number().int().min(1).max(10).optional(),
-  timezone: z.string().optional(),
+  timezone: z.string().nullable().optional(),
 });
 
 export const createChannelSchema = z.object({
