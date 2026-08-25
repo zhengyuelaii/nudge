@@ -8,10 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 
-type Tab = 'ai' | 'push' | 'search';
+type Tab = 'general' | 'ai' | 'push' | 'search';
 
-const activeTab = ref<Tab>('ai');
+const activeTab = ref<Tab>('general');
 const loading = ref(true);
 // loaded = 数据已从后端填充完成，之后才允许 autosave，避免初始赋值触发空保存
 const loaded = ref(false);
@@ -20,6 +21,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 const saveState = ref<SaveState>('idle');
 
 const tabs: { key: Tab; label: string }[] = [
+  { key: 'general', label: '通用' },
   { key: 'ai', label: 'AI 配置' },
   { key: 'push', label: '推送配置' },
   { key: 'search', label: '搜索配置' },
@@ -36,6 +38,11 @@ interface Settings {
   ai_model: string | null;
   search_provider: string;
   search_api_key: string | null;
+  use_agent_loop: number;
+  agent_max_steps: number;
+  agent_trace_enabled: number;
+  notify_guard: number;
+  locale: string;
 }
 
 interface Channel {
@@ -51,6 +58,7 @@ const ai = reactive({ baseUrl: '', apiKey: '', model: '' });
 const search = reactive({ provider: 'tavily', apiKey: '' });
 const feishu = reactive({ webhookUrl: '', secret: '' });
 const email = reactive({ smtpHost: '', smtpPort: '465', from: '', password: '', to: '' });
+const general = reactive({ useAgentLoop: false, agentMaxSteps: 8, agentTraceEnabled: false, notifyGuard: false, locale: 'zh-CN' });
 
 // 已存在渠道 id：有则 PUT 更新，无则 POST 创建并记下 id，避免重复创建
 const channelId: Record<string, number> = {};
@@ -114,6 +122,11 @@ onMounted(async () => {
     ai.model = s.ai_model ?? '';
     search.provider = s.search_provider;
     search.apiKey = s.search_api_key ?? '';
+    general.useAgentLoop = !!s.use_agent_loop;
+    general.agentMaxSteps = s.agent_max_steps ?? 8;
+    general.agentTraceEnabled = !!s.agent_trace_enabled;
+    general.notifyGuard = !!s.notify_guard;
+    general.locale = s.locale ?? 'zh-CN';
     chs.forEach((c) => {
       channelId[c.type] = c.id;
       loadChannelConfig(c);
@@ -134,6 +147,11 @@ async function persistSettings() {
     aiModel: ai.model || '',
     searchProvider: search.provider || 'tavily',
     searchApiKey: search.apiKey || '',
+    useAgentLoop: general.useAgentLoop ? 1 : 0,
+    agentMaxSteps: general.agentMaxSteps,
+    agentTraceEnabled: general.agentTraceEnabled ? 1 : 0,
+    notifyGuard: general.notifyGuard ? 1 : 0,
+    locale: general.locale,
   });
 }
 
@@ -179,7 +197,7 @@ async function saveAll() {
 }
 
 // 内容变化自动保存：debounce 600ms，避免连续输入时频繁请求
-watchDebounced(() => ({ ai, search, feishu, email }), () => saveAll(), {
+watchDebounced(() => ({ ai, search, feishu, email, general }), () => saveAll(), {
   debounce: 600,
   deep: true,
 });
@@ -229,6 +247,63 @@ async function sendTest(type: string) {
       </nav>
 
       <div class="min-w-0 flex-1">
+        <template v-if="activeTab === 'general'">
+          <Card>
+            <CardHeader>
+              <CardTitle>通用配置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div class="space-y-6">
+                <div class="space-y-2">
+                  <Label>界面语言</Label>
+                  <Select v-model="general.locale">
+                    <SelectTrigger class="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="zh-CN">简体中文</SelectItem>
+                      <SelectItem value="en">English</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p class="text-xs text-muted-foreground">切换界面显示语言（需刷新生效）</p>
+                </div>
+
+                <div class="border-t border-gray-100 pt-4">
+                  <h3 class="mb-3 text-sm font-medium text-gray-700">Agent 巡检</h3>
+                  <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <Label>启用 Agent 模式</Label>
+                        <p class="text-xs text-muted-foreground">开启后使用 AI Agent 循环巡检，关闭则使用固定流水线</p>
+                      </div>
+                      <Switch v-model:checked="general.useAgentLoop" />
+                    </div>
+                    <div v-if="general.useAgentLoop" class="space-y-2">
+                      <Label>最大步数</Label>
+                      <Input v-model.number="general.agentMaxSteps" type="number" min="1" max="50" class="w-24" />
+                      <p class="text-xs text-muted-foreground">Agent 单次巡检最大循环步数（1-50）</p>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <Label>执行轨迹</Label>
+                        <p class="text-xs text-muted-foreground">记录 Agent 每步执行轨迹，便于排查</p>
+                      </div>
+                      <Switch v-model:checked="general.agentTraceEnabled" />
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <Label>通知安全网</Label>
+                        <p class="text-xs text-muted-foreground">开启后 Agent 通知前校验是否有重要度达标的变化</p>
+                      </div>
+                      <Switch v-model:checked="general.notifyGuard" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </template>
+
         <template v-if="activeTab === 'ai'">
           <Card>
             <CardHeader>

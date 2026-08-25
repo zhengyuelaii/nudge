@@ -132,6 +132,44 @@ export const updateService = {
     return inserted;
   },
 
+  countByRun(userId: number, taskRunId: number): number {
+    const row = db
+      .prepare('SELECT COUNT(*) AS c FROM "update" WHERE user_id = ? AND task_run_id = ?')
+      .get(userId, taskRunId) as { c: number };
+    return row.c;
+  },
+
+  countNotifiedByRun(userId: number, taskRunId: number): number {
+    const row = db
+      .prepare('SELECT COUNT(*) AS c FROM "update" WHERE user_id = ? AND task_run_id = ? AND is_notified = 1')
+      .get(userId, taskRunId) as { c: number };
+    return row.c;
+  },
+
+  listByRun(
+    userId: number,
+    taskRunId: number,
+    opts: { importance?: number } = {},
+  ): UpdateRow[] {
+    const conditions = ['u.user_id = ?', 'u.task_run_id = ?'];
+    const values: unknown[] = [userId, taskRunId];
+
+    if (opts.importance !== undefined) {
+      conditions.push('u.importance >= ?');
+      values.push(opts.importance);
+    }
+
+    const where = conditions.join(' AND ');
+    const rows = db.prepare(`
+      SELECT u.*, i.name AS interest_name, i.tags AS interest_tags
+      FROM "update" u
+      INNER JOIN interest i ON i.id = u.interest_id
+      WHERE ${where}
+      ORDER BY u.created_at DESC
+    `).all(...values) as (Omit<UpdateRow, 'interest_tags'> & { interest_tags: string | null })[];
+    return rows.map((r) => ({ ...r, interest_tags: parseTags(r.interest_tags) }));
+  },
+
   markNotified(userId: number, ids: number[]): void {
     if (ids.length === 0) return;
     const placeholders = ids.map(() => '?').join(', ');

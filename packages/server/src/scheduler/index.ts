@@ -2,7 +2,9 @@ import cron from 'node-cron';
 import { db } from '../db/client.js';
 import { nowUtc } from '../lib/time.js';
 import { interestService } from '../services/interest.service.js';
+import { settingsService } from '../services/settings.service.js';
 import { runCheck } from './check.js';
+import { runAgentCheck } from '../agent/loop.js';
 
 export interface DueTask {
   id: number;
@@ -41,8 +43,17 @@ export interface RunDueOptions {
   now?: string;
 }
 
+async function defaultRunner(taskId: number): Promise<unknown> {
+  const task = interestService.getTask(taskId);
+  const settings = settingsService.get(task.user_id);
+  if (settings.use_agent_loop) {
+    return runAgentCheck(taskId);
+  }
+  return runCheck(taskId);
+}
+
 export async function runDueTasks(opts: RunDueOptions = {}): Promise<number[]> {
-  const runner = opts.runner ?? runCheck;
+  const runner = opts.runner ?? defaultRunner;
   const due = findDueTasks(opts.now);
   const executed: number[] = [];
 

@@ -39,6 +39,37 @@ if (!interestCols.includes('channel_ids')) {
 // search_provider 早期 init 未设默认，已有库补 'tavily'（单 provider 阶段兜底）
 db.exec(`UPDATE settings SET search_provider = 'tavily' WHERE search_provider IS NULL OR search_provider = ''`);
 
+// Agent loop 增列：task_run.{agent_steps, trace, trace_text}
+if (!taskRunCols.includes('agent_steps')) {
+  db.exec('ALTER TABLE task_run ADD COLUMN agent_steps INTEGER');
+}
+if (!taskRunCols.includes('trace')) {
+  db.exec('ALTER TABLE task_run ADD COLUMN trace TEXT');
+}
+if (!taskRunCols.includes('trace_text')) {
+  db.exec('ALTER TABLE task_run ADD COLUMN trace_text TEXT');
+}
+
+// Agent loop 增列：settings.{agent_max_steps, agent_trace_enabled, notify_guard, use_agent_loop}
+const settingsCols = (db.prepare('PRAGMA table_info(settings)').all() as { name: string }[]).map(
+  (c) => c.name,
+);
+if (!settingsCols.includes('agent_max_steps')) {
+  db.exec('ALTER TABLE settings ADD COLUMN agent_max_steps INTEGER DEFAULT 8');
+}
+if (!settingsCols.includes('agent_trace_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN agent_trace_enabled INTEGER DEFAULT 0');
+}
+if (!settingsCols.includes('notify_guard')) {
+  db.exec('ALTER TABLE settings ADD COLUMN notify_guard INTEGER DEFAULT 0');
+}
+if (!settingsCols.includes('use_agent_loop')) {
+  db.exec('ALTER TABLE settings ADD COLUMN use_agent_loop INTEGER DEFAULT 0');
+}
+if (!settingsCols.includes('locale')) {
+  db.exec("ALTER TABLE settings ADD COLUMN locale TEXT NOT NULL DEFAULT 'zh-CN'");
+}
+
 export function transaction<T>(fn: () => T): T {
   const run = db.transaction(fn);
   return run();

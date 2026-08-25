@@ -164,6 +164,26 @@ CREATE TABLE IF NOT EXISTS schema_migration (
   applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ------------------------------------------------------------
+-- 8. interest_state — Agent 跨轮状态记忆
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS interest_state (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id           INTEGER NOT NULL DEFAULT 1,
+  interest_id       INTEGER NOT NULL,
+  summary           TEXT,
+  key_points        TEXT,            -- JSON array
+  query_hints       TEXT,            -- JSON array: 下次查询建议
+  last_checked_at   TEXT,
+  no_change_streak  INTEGER NOT NULL DEFAULT 0,
+  created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(interest_id),
+  FOREIGN KEY(interest_id) REFERENCES interest(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_interest_state_user ON interest_state(user_id);
+
 -- ============================================================
 -- 初始数据（默认用户 user_id = 1）
 -- ============================================================

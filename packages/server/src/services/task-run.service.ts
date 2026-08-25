@@ -19,6 +19,9 @@ export interface TaskRunRow {
   llm_total_cost: number | null;
   error_type: string | null;
   error_message: string | null;
+  agent_steps: number | null;
+  trace: string | null;
+  trace_text: string | null;
   created_at: string;
   interest_name?: string;
 }
@@ -110,6 +113,9 @@ export const taskRunService = {
       updatesCreated?: number;
       llmInputTokens?: number;
       llmOutputTokens?: number;
+      agentSteps?: number;
+      trace?: string;
+      traceText?: string;
     } = {},
   ): void {
     const run = taskRunService.get(userId, id);
@@ -122,7 +128,8 @@ export const taskRunService = {
        SET status = 'success', finished_at = ?, duration_ms = ?,
            search_query = ?, search_result_count = ?,
            updates_created_count = ?,
-           llm_input_tokens = ?, llm_output_tokens = ?
+           llm_input_tokens = ?, llm_output_tokens = ?,
+           agent_steps = ?, trace = ?, trace_text = ?
        WHERE id = ? AND user_id = ?`,
     ).run(
       finishedAt,
@@ -132,6 +139,9 @@ export const taskRunService = {
       stats.updatesCreated ?? run.updates_created_count,
       stats.llmInputTokens ?? run.llm_input_tokens,
       stats.llmOutputTokens ?? run.llm_output_tokens,
+      stats.agentSteps ?? run.agent_steps,
+      stats.trace ?? run.trace,
+      stats.traceText ?? run.trace_text,
       id,
       userId,
     );
