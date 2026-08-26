@@ -37,6 +37,13 @@ function addColumn(database: DatabaseType, table: string, column: string, defini
 function runMigrations(database: DatabaseType): void {
   // interest_state 已废弃：历史状态改由 interest_event/source 派生，老库幂等清理
   database.exec('DROP TABLE IF EXISTS interest_state');
+
+  // settings: agent v0.2 的 use_agent_loop/agent_* 系列字段收敛为 run_mode + extra
+  addColumn(database, 'settings', 'run_mode', "TEXT NOT NULL DEFAULT 'default'");
+  addColumn(database, 'settings', 'extra', 'TEXT');
+
+  // task_run: update 时代遗留的 updates_created_count 更名为 sources_created_count
+  addColumn(database, 'task_run', 'sources_created_count', 'INTEGER');
 }
 
 runMigrations(db);
