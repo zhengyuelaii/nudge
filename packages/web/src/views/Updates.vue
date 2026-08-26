@@ -1,144 +1,72 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
-import { useRoute } from 'vue-router';
-import { api } from '../api/index.js';
-import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CircleDotIcon, BotIcon, ExternalLinkIcon } from "@lucide/vue";
+import { Timeline } from "@/components/timeline";
+import { mockInterestEvents } from "./mock/mock-timeline";
 
-interface Interest {
-  id: number;
-  name: string;
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr + "Z");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${mm}-${dd} ${hh}:${mi}`;
 }
 
-interface Update {
-  id: number;
-  title: string;
-  summary: string | null;
-  source_name: string | null;
-  source_url: string | null;
-  interest_tags: string[];
-  importance: number;
-  has_progress: number;
-  published_at: string | null;
-  created_at: string;
-  is_read: number;
+function openUrl(url: string | null) {
+  if (url) window.open(url, "_blank", "noopener");
 }
 
-const route = useRoute();
-const interests = ref<Interest[]>([]);
-const selectedInterestId = ref<number | null>(null);
-const updates = ref<Update[]>([]);
-const loadingInterests = ref(true);
-const loadingUpdates = ref(false);
-
-const importanceBadgeVariant = (n: number): 'destructive' | 'default' | 'secondary' => {
-  if (n >= 8) return 'destructive';
-  if (n >= 6) return 'default';
-  return 'secondary';
-};
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr + 'Z');
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}小时前`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 7) return `${diffD}天前`;
-  return `${Math.floor(diffD / 7)}周前`;
-}
-
-onMounted(async () => {
-  try {
-    interests.value = await api.get<Interest[]>('/interests');
-    const qid = Number(route.query.interest_id);
-    if (qid && interests.value.some((i) => i.id === qid)) {
-      selectedInterestId.value = qid;
-    } else if (interests.value.length > 0) {
-      selectedInterestId.value = interests.value[0].id;
-    }
-  } catch (e) {
-    console.error('加载兴趣失败:', e);
-  } finally {
-    loadingInterests.value = false;
-  }
-});
-
-watch(selectedInterestId, async (id) => {
-  if (!id) { updates.value = []; return; }
-  loadingUpdates.value = true;
-  try {
-    updates.value = await api.get<Update[]>(`/updates?interest_id=${id}`);
-  } catch (e) {
-    console.error('加载更新失败:', e);
-  } finally {
-    loadingUpdates.value = false;
-  }
-});
+let lastDay = "";
 </script>
 
 <template>
-  <div>
-    <div class="mb-3 border-b border-gray-200 pb-2">
-      <h2 class="mb-2 text-base font-bold">动态</h2>
-      <Select v-model="selectedInterestId">
-        <SelectTrigger class="w-full">
-          <SelectValue placeholder="选择一个兴趣点..." />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem v-for="item in interests" :key="item.id" :value="item.id">
-            {{ item.name }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
+  <div class="p-4">
+    <h2 class="mb-4 text-base font-bold">动态</h2>
 
-    <div v-if="!selectedInterestId" class="border border-gray-200 bg-white p-12 text-center text-sm text-gray-400">
-      请选择一个兴趣点查看动态
-    </div>
-
-    <div v-else-if="loadingUpdates" class="border border-gray-200 bg-white p-12 text-center text-sm text-gray-400">加载中...</div>
-
-    <div v-else-if="updates.length === 0" class="border border-gray-200 bg-white p-12 text-center text-sm text-gray-400">
-      暂无更新记录
-    </div>
-
-    <div v-else class="overflow-hidden rounded border border-gray-200 bg-white">
-      <div
-        v-for="(item, idx) in updates"
-        :key="item.id"
-        class="flex gap-5 px-5 py-4"
-        :class="idx > 0 ? 'border-t border-gray-100' : ''"
+    <Timeline.Root class="w-full list-none p-0">
+      <Timeline.Item
+        v-for="(event, index) in mockInterestEvents"
+        :key="event.id"
+        class="animate-in fade-in slide-in-from-left-4 fill-mode-both duration-500"
+        :style="{ animationDelay: `${index * 60}ms` }"
       >
-        <div class="relative flex shrink-0 flex-col items-center pt-1">
-          <span
-            class="z-10 h-3 w-3 rounded-full ring-4 ring-white"
-            :class="item.importance >= 7 ? 'bg-green-500' : 'bg-gray-300'"
-          />
-          <div v-if="idx < updates.length - 1" class="mt-1 w-px flex-1 bg-gray-200" />
-        </div>
+        <Timeline.Media variant="icon">
+          <BotIcon v-if="event.run_mode === 'agent'" class="size-4 text-blue-500" />
+          <CircleDotIcon v-else class="size-4 text-emerald-500" />
+        </Timeline.Media>
 
-        <div class="min-w-0 flex-1 pb-1">
-          <div class="mb-1 flex items-center gap-2">
-            <span class="text-xs text-gray-400">{{ timeAgo(item.created_at) }}</span>
-            <Badge :variant="importanceBadgeVariant(item.importance)">
-              {{ item.importance }}分
-            </Badge>
-            <Badge v-if="item.has_progress" variant="secondary" class="text-green-700">
-              有进展
-            </Badge>
+        <Timeline.Content>
+          <div v-if="event.created_at.slice(0, 10) !== lastDay && (lastDay = event.created_at.slice(0, 10))" class="mb-2 flex h-8 items-center text-xs font-medium text-muted-foreground">
+            {{ event.created_at.slice(0, 10) }}
           </div>
-          <h3 class="text-sm font-medium leading-snug text-gray-900">{{ item.title }}</h3>
-          <div v-if="item.summary" class="mt-1 text-xs leading-relaxed text-gray-500">{{ item.summary }}</div>
-          <div class="mt-2 flex items-center gap-2 text-xs text-gray-400">
-            <span>{{ item.source_name ?? '未知来源' }}</span>
-            <span v-if="item.source_url" class="text-gray-300">|</span>
-            <a v-if="item.source_url" :href="item.source_url" target="_blank" class="text-blue-500 hover:underline">原文</a>
+          <div class="overflow-hidden rounded-md border border-border bg-card">
+            <div class="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2 text-sm">
+              <span class="font-semibold text-foreground">{{ event.title }}</span>
+              <span class="shrink-0 text-xs text-muted-foreground">{{ formatDate(event.created_at) }}</span>
+            </div>
+            <div class="px-3 py-2">
+              <p v-if="event.description" class="text-sm leading-relaxed text-muted-foreground">{{ event.description }}</p>
+              <div v-if="event.sources.length > 0" class="mt-2 space-y-1">
+                <div
+                  v-for="src in event.sources"
+                  :key="src.id"
+                  class="flex items-center gap-1.5 text-xs"
+                >
+                  <span class="text-muted-foreground">›</span>
+                  <span class="font-medium text-foreground">{{ src.name }}</span>
+                  <span class="text-muted-foreground">-</span>
+                  <span
+                    class="min-w-0 truncate text-muted-foreground"
+                    :class="src.url ? 'cursor-pointer hover:text-foreground' : ''"
+                    @click="openUrl(src.url)"
+                  >{{ src.title }}</span>
+                  <ExternalLinkIcon v-if="src.url" class="size-3 shrink-0 text-muted-foreground" />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
+        </Timeline.Content>
+      </Timeline.Item>
+    </Timeline.Root>
   </div>
 </template>

@@ -32,7 +32,7 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 ## SQLite / 迁移
 
-- **无迁移框架**。单一幂等文件 `migrations/V20260818_001__init.sql` 每次启动 `CREATE TABLE IF NOT EXISTS`。SQLite 的 `ADD COLUMN` 无 `IF NOT EXISTS`，**新增列必须在代码里 guard** —— 见 `db/client.ts`（`PRAGMA table_info(...)` 后条件 `ALTER TABLE`）。明确决定不引入迁移 runner。
+- **无迁移框架**。单一幂等文件 `migrations/V20260818_001__init.sql` 每次启动 `CREATE TABLE IF NOT EXISTS`。明确决定不引入迁移 runner；新列直接加进 init SQL 即可。
 - `"update"` 是 SQL 保留字，SQL 里始终双引号。
 - DB 落在 `packages/server/data/nudge.db`，`DB_PATH` 可覆盖；测试强制 `DB_PATH=:memory:`，故改表结构必须同步进 init 文件测试才可见。
 

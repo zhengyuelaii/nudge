@@ -12,63 +12,36 @@ db.pragma('foreign_keys = ON');
 
 db.exec(readInitSql());
 
-// 幂等补列：SQLite 的 ADD COLUMN 无 IF NOT EXISTS，已有库启动时补齐
-// （正式 SQL 迁移框架待项目稳定后实现，见 CLAUDE.md Key Decisions）
-const taskRunCols = (db.prepare('PRAGMA table_info(task_run)').all() as { name: string }[]).map(
-  (c) => c.name,
-);
-if (!taskRunCols.includes('updates_created_count')) {
-  db.exec('ALTER TABLE task_run ADD COLUMN updates_created_count INTEGER');
+// 渐进式 schema 迁移（MVP 不引入迁移框架）：init.sql 仅覆盖新建库，
+// 已存在的库靠此处 PRAGMA 检测 + ALTER 兜底补齐缺列。所有 ALTER 幂等。
+function tableExists(database: DatabaseType, table: string): boolean {
+  const row = database
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+    .get(table);
+  return !!row;
 }
 
-// category → tags 迁移：旧库有 category 列，无 tags 列时补齐并转换数据
-const interestCols = (db.prepare('PRAGMA table_info(interest)').all() as { name: string }[]).map(
-  (c) => c.name,
-);
-if (interestCols.includes('category') && !interestCols.includes('tags')) {
-  db.exec("ALTER TABLE interest ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'");
-  db.exec("UPDATE interest SET tags = json_array(category) WHERE category != '' AND category IS NOT NULL");
-  db.exec('DROP INDEX IF EXISTS idx_interest_user_category');
+function columnExists(database: DatabaseType, table: string, column: string): boolean {
+  if (!tableExists(database, table)) return false;
+  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return cols.some((c) => c.name === column);
 }
 
-// interest.channel_ids 早期 init 未含，已有库补齐（JSON 数组，存选中的通知渠道 id）
-if (!interestCols.includes('channel_ids')) {
-  db.exec("ALTER TABLE interest ADD COLUMN channel_ids TEXT NOT NULL DEFAULT '[]'");
+function addColumn(database: DatabaseType, table: string, column: string, definition: string): void {
+  if (!tableExists(database, table)) return;
+  if (!columnExists(database, table, column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
-// search_provider 早期 init 未设默认，已有库补 'tavily'（单 provider 阶段兜底）
-db.exec(`UPDATE settings SET search_provider = 'tavily' WHERE search_provider IS NULL OR search_provider = ''`);
-
-// Agent loop 增列：task_run.{agent_steps, trace, trace_text}
-if (!taskRunCols.includes('agent_steps')) {
-  db.exec('ALTER TABLE task_run ADD COLUMN agent_steps INTEGER');
-}
-if (!taskRunCols.includes('trace')) {
-  db.exec('ALTER TABLE task_run ADD COLUMN trace TEXT');
-}
-if (!taskRunCols.includes('trace_text')) {
-  db.exec('ALTER TABLE task_run ADD COLUMN trace_text TEXT');
+function runMigrations(database: DatabaseType): void {
+  // interest_state: 跨轮结构化状态（程序维护）新增列
+  addColumn(database, 'interest_state', 'last_query', 'TEXT');
+  addColumn(database, 'interest_state', 'last_result_count', 'INTEGER');
+  addColumn(database, 'interest_state', 'last_change_at', 'TEXT');
 }
 
-// Agent loop 增列：settings.{agent_max_steps, agent_trace_enabled, notify_guard, use_agent_loop}
-const settingsCols = (db.prepare('PRAGMA table_info(settings)').all() as { name: string }[]).map(
-  (c) => c.name,
-);
-if (!settingsCols.includes('agent_max_steps')) {
-  db.exec('ALTER TABLE settings ADD COLUMN agent_max_steps INTEGER DEFAULT 8');
-}
-if (!settingsCols.includes('agent_trace_enabled')) {
-  db.exec('ALTER TABLE settings ADD COLUMN agent_trace_enabled INTEGER DEFAULT 0');
-}
-if (!settingsCols.includes('notify_guard')) {
-  db.exec('ALTER TABLE settings ADD COLUMN notify_guard INTEGER DEFAULT 0');
-}
-if (!settingsCols.includes('use_agent_loop')) {
-  db.exec('ALTER TABLE settings ADD COLUMN use_agent_loop INTEGER DEFAULT 0');
-}
-if (!settingsCols.includes('locale')) {
-  db.exec("ALTER TABLE settings ADD COLUMN locale TEXT NOT NULL DEFAULT 'zh-CN'");
-}
+runMigrations(db);
 
 export function transaction<T>(fn: () => T): T {
   const run = db.transaction(fn);

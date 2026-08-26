@@ -72,6 +72,9 @@ CREATE TABLE IF NOT EXISTS task_run (
   llm_total_cost       REAL,
   error_type           TEXT    CHECK (error_type IS NULL OR error_type IN ('search_failed', 'llm_failed', 'notify_failed', 'unknown')),
   error_message        TEXT,
+  agent_steps          INTEGER,
+  trace                TEXT,
+  trace_text           TEXT,
   created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (task_id)     REFERENCES task(id)     ON DELETE CASCADE,
   FOREIGN KEY (interest_id) REFERENCES interest(id) ON DELETE CASCADE
@@ -129,6 +132,11 @@ CREATE TABLE IF NOT EXISTS settings (
   search_api_key    TEXT,
   timezone          TEXT    NOT NULL DEFAULT 'Asia/Shanghai',
   notify_threshold  INTEGER NOT NULL DEFAULT 7 CHECK (notify_threshold BETWEEN 1 AND 10),
+  agent_max_steps       INTEGER DEFAULT 8,
+  agent_trace_enabled   INTEGER DEFAULT 0,
+  notify_guard          INTEGER DEFAULT 0,
+  use_agent_loop        INTEGER DEFAULT 0,
+  locale                TEXT    NOT NULL DEFAULT 'zh-CN',
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (user_id)
@@ -165,7 +173,7 @@ CREATE TABLE IF NOT EXISTS schema_migration (
 );
 
 -- ------------------------------------------------------------
--- 8. interest_state — Agent 跨轮状态记忆
+-- 8. interest_state — 跨轮结构化状态（程序维护；固定流程每轮读取并确定性写回）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS interest_state (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,9 +181,12 @@ CREATE TABLE IF NOT EXISTS interest_state (
   interest_id       INTEGER NOT NULL,
   summary           TEXT,
   key_points        TEXT,            -- JSON array
-  query_hints       TEXT,            -- JSON array: 下次查询建议
+  query_hints       TEXT,            -- JSON array: 下次查询建议（程序依据 tags/上次结果生成）
   last_checked_at   TEXT,
   no_change_streak  INTEGER NOT NULL DEFAULT 0,
+  last_query        TEXT,            -- 本轮实际查询词（含 tags 增强），下轮据此换角度避免重复召回
+  last_result_count INTEGER,         -- 本轮搜索结果数，辅助判断召回质量
+  last_change_at    TEXT,            -- 最近一次产生变化的时刻，供「无变化」判断
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE(interest_id),

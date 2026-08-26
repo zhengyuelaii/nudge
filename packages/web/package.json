@@ -10,11 +10,13 @@
     "lint": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@ark-ui/vue": "^5.39.0",
     "@lucide/vue": "^1.33.0",
     "@nudge/shared": "workspace:*",
     "@vueuse/core": "^14.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cnfast": "^0.1.0",
     "reka-ui": "^2.10.3",
     "shadcn-vue": "^2.8.2",
     "tailwind-merge": "^3.6.0",

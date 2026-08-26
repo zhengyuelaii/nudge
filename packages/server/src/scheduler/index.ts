@@ -44,11 +44,11 @@ export interface RunDueOptions {
 }
 
 async function defaultRunner(taskId: number): Promise<unknown> {
-  const task = interestService.getTask(taskId);
-  const settings = settingsService.get(task.user_id);
-  if (settings.use_agent_loop) {
-    return runAgentCheck(taskId);
-  }
+  // const task = interestService.getTask(taskId);
+  // const settings = settingsService.get(task.user_id);
+  // if (settings.use_agent_loop) {
+  //   return runAgentCheck(taskId);
+  // }
   return runCheck(taskId);
 }
 
