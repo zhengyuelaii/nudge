@@ -30,14 +30,10 @@ export const updateSettingsSchema = z.object({
   aiModel: z.string().nullable().optional(),
   searchProvider: z.string().nullable().optional(),
   searchApiKey: z.string().nullable().optional(),
-  notifyThreshold: z.number().int().min(1).max(10).optional(),
   timezone: z.string().nullable().optional(),
-  // Agent loop settings
-  useAgentLoop: z.number().int().min(0).max(1).optional(),
-  agentMaxSteps: z.number().int().min(1).max(50).optional(),
-  agentTraceEnabled: z.number().int().min(0).max(1).optional(),
-  notifyGuard: z.number().int().min(0).max(1).optional(),
   locale: z.string().optional(),
+  runMode: z.enum(['default', 'agent']).optional(),
+  extra: z.record(z.unknown()).nullable().optional(),
 });
 
 export const createChannelSchema = z.object({

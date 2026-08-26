@@ -57,7 +57,22 @@ const route = useRoute();
     </header>
 
     <main class="mx-auto max-w-[900px] px-4 py-6">
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <Transition name="page" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </RouterView>
     </main>
   </div>
 </template>
+
+<style scoped>
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.15s ease;
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+</style>

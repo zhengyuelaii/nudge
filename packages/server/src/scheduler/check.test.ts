@@ -31,7 +31,7 @@ function seed(): void {
   seedTaskId = Number(task.lastInsertRowid);
 
   db.prepare(
-    "UPDATE settings SET search_api_key = 'tvly-test', ai_api_key = 'sk-test', ai_model = 'deepseek-v4-flash', notify_threshold = 7 WHERE user_id = 1",
+    "UPDATE settings SET search_api_key = 'tvly-test', ai_api_key = 'sk-test', ai_model = 'deepseek-v4-flash' WHERE user_id = 1",
   ).run();
 
   db.prepare(
@@ -42,7 +42,7 @@ function seed(): void {
 
 beforeEach(() => {
   db.exec(
-    'DELETE FROM "update"; DELETE FROM task_run; DELETE FROM notification_channel; DELETE FROM task; DELETE FROM interest;',
+    'DELETE FROM source; DELETE FROM interest_event; DELETE FROM task_run; DELETE FROM notification_channel; DELETE FROM task; DELETE FROM interest;',
   );
   seed();
 });
@@ -88,15 +88,16 @@ describe('runCheck', () => {
       'open.feishu.cn': { code: 0, msg: 'success' },
     });
     const model = mockModel({
-      elements: [
+      has_progress: true,
+      title: '华友钴业上半年净利创新高',
+      summary: '营收 555.68 亿元，同比增 49.39%',
+      source: [
         {
-          title: '华友钴业上半年净利创新高',
-          summary: '营收 555.68 亿元，同比增 49.39%',
+          title: '华友钴业发布半年报',
           source_url: 'https://example.com/news/1',
           source_name: '东方财富',
           published_at: '2026-08-18',
-          importance: 9,
-          has_progress: true,
+          importance: 8,
         },
       ],
     });
@@ -106,39 +107,39 @@ describe('runCheck', () => {
     expect(result.createdCount).toBe(1);
     expect(result.notifiedCount).toBe(1);
 
-    const update = db
-      .prepare(
-        'SELECT u.*, t.status AS run_status FROM "update" u JOIN task_run t ON t.id = u.task_run_id',
-      )
+    const event = db
+      .prepare('SELECT e.*, t.status AS run_status FROM interest_event e JOIN task_run t ON t.id = e.task_run_id')
       .get() as any;
-    expect(update.title).toBe('华友钴业上半年净利创新高');
-    expect(update.importance).toBe(9);
-    expect(update.has_progress).toBe(1);
-    expect(update.is_notified).toBe(1);
-    expect(update.notified_at).toBeTruthy();
+    expect(event.title).toBe('华友钴业上半年净利创新高');
+    expect(event.summary).toBe('营收 555.68 亿元，同比增 49.39%');
+    expect(event.run_status).toBe('success');
+
+    const source = db.prepare('SELECT * FROM source WHERE event_id = ?').get(event.id) as any;
+    expect(source.title).toBe('华友钴业发布半年报');
 
     const run = taskRunService.get(1, result.runId);
     expect(run.status).toBe('success');
     expect(run.search_result_count).toBe(1);
-    expect(run.search_query).toBe('华友钴业 股价 最新');
     expect(run.llm_input_tokens).toBe(10);
     expect(run.llm_output_tokens).toBe(20);
-    expect(run.updates_created_count).toBe(1);
+    expect(run.sources_created_count).toBe(1);
   });
 
-  it('writes below-threshold updates without notifying', async () => {
+  it('writes sources without notifying when no channels configured', async () => {
+    db.prepare('DELETE FROM notification_channel').run();
+
     const fetchImpl = mockFetch({
       'api.tavily.com': SEARCH_RESULTS,
-      'open.feishu.cn': { code: 0, msg: 'success' },
     });
     const model = mockModel({
-      elements: [
+      has_progress: true,
+      title: '华友钴业小动态',
+      summary: '一般消息',
+      source: [
         {
           title: '华友钴业小动态',
-          summary: '一般消息',
           source_url: 'https://example.com/news/2',
-          importance: 4,
-          has_progress: false,
+          importance: 5,
         },
       ],
     });
@@ -148,11 +149,88 @@ describe('runCheck', () => {
     expect(result.createdCount).toBe(1);
     expect(result.notifiedCount).toBe(0);
 
-    const update = db
-      .prepare('SELECT is_notified, notified_at FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
-      .get() as any;
-    expect(update.is_notified).toBe(0);
-    expect(update.notified_at).toBeNull();
+    const event = db.prepare('SELECT * FROM interest_event ORDER BY id DESC LIMIT 1').get() as any;
+    expect(event.title).toBe('华友钴业小动态');
+    expect(event.summary).toBe('一般消息');
+
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('success');
+  });
+
+  it('creates nothing when the model reports no progress', async () => {
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+      'open.feishu.cn': { code: 0, msg: 'success' },
+    });
+    const model = mockModel({
+      has_progress: false,
+      title: '',
+      summary: '',
+      source: [],
+    });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(result.createdCount).toBe(0);
+    expect(result.notifiedCount).toBe(0);
+
+    const events = db.prepare('SELECT * FROM interest_event').all();
+    expect(events).toHaveLength(0);
+
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('success');
+  });
+
+  it('filters out sources below importance threshold but keeps the event', async () => {
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+      'open.feishu.cn': { code: 0, msg: 'success' },
+    });
+    const model = mockModel({
+      has_progress: true,
+      title: '真正进展',
+      summary: '本轮有实质进展',
+      source: [
+        { title: '重复旧闻', source_url: 'https://example.com/old', importance: 3 },
+        { title: '一般消息', source_url: 'https://example.com/meh', importance: 4 },
+        { title: '真正进展', source_url: 'https://example.com/new', importance: 7 },
+      ],
+    });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(result.createdCount).toBe(1);
+    expect(result.notifiedCount).toBe(1);
+
+    const sources = db.prepare('SELECT * FROM source').all() as any[];
+    expect(sources).toHaveLength(1);
+    expect(sources[0].title).toBe('真正进展');
+
+    const event = db.prepare('SELECT * FROM interest_event').get() as any;
+    expect(event.title).toBe('真正进展');
+  });
+
+  it('creates nothing when all sources fall below the importance threshold', async () => {
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+    });
+    const model = mockModel({
+      has_progress: true,
+      title: '低价值更新',
+      summary: '都是无关消息',
+      source: [
+        { title: '无关一', source_url: 'https://example.com/a', importance: 3 },
+        { title: '无关二', source_url: 'https://example.com/b', importance: 4 },
+      ],
+    });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(result.createdCount).toBe(0);
+    expect(result.notifiedCount).toBe(0);
+
+    const events = db.prepare('SELECT * FROM interest_event').all();
+    expect(events).toHaveLength(0);
 
     const run = taskRunService.get(1, result.runId);
     expect(run.status).toBe('success');
@@ -163,7 +241,7 @@ describe('runCheck', () => {
       'api.tavily.com': { body: { error: 'boom' }, status: 500 },
       'open.feishu.cn': { code: 0 },
     });
-    const model = mockModel({ elements: [] });
+    const model = mockModel({ has_progress: false, title: '', summary: '', source: [] });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });
 
@@ -194,7 +272,10 @@ describe('runCheck', () => {
       'api.tavily.com': { body: { error: 'boom' }, status: 500 },
     });
 
-    await runCheck(otherTaskId, { fetchImpl, model: mockModel({ elements: [] }) });
+    await runCheck(otherTaskId, {
+      fetchImpl,
+      model: mockModel({ has_progress: false, title: '', summary: '', source: [] }),
+    });
 
     const run = db
       .prepare('SELECT * FROM task_run WHERE task_id = ?')
@@ -204,13 +285,16 @@ describe('runCheck', () => {
     expect(run.error_type).toBe('search_failed');
   });
 
-  it('marks the run partial when notify fails but updates were written', async () => {
+  it('marks the run failed when notify fails but sources were written', async () => {
     const fetchImpl = mockFetch({
       'api.tavily.com': SEARCH_RESULTS,
       'open.feishu.cn': { code: 19021, msg: 'sign match fail' },
     });
     const model = mockModel({
-      elements: [
+      has_progress: true,
+      title: '华友钴业重大消息',
+      summary: '',
+      source: [
         {
           title: '华友钴业重大消息',
           source_url: 'https://example.com/news/3',
@@ -224,16 +308,17 @@ describe('runCheck', () => {
     expect(result.createdCount).toBe(1);
 
     const run = taskRunService.get(1, result.runId);
-    expect(run.status).toBe('partial');
+    expect(run.status).toBe('failed');
     expect(run.error_type).toBe('notify_failed');
     expect(run.llm_input_tokens).toBe(10);
     expect(run.llm_output_tokens).toBe(20);
-    expect(run.updates_created_count).toBe(1);
+    expect(run.sources_created_count).toBe(1);
 
-    const update = db
-      .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
-      .get() as any;
-    expect(update.is_notified).toBe(0);
+    const event = db.prepare('SELECT * FROM interest_event ORDER BY id DESC LIMIT 1').get() as any;
+    expect(event).toBeTruthy();
+
+    const source = db.prepare('SELECT * FROM source WHERE event_id = ?').get(event.id) as any;
+    expect(source).toBeTruthy();
   });
 
   it('notifies across multiple picked channels', async () => {
@@ -255,22 +340,21 @@ describe('runCheck', () => {
       'other.feishu.cn': { code: 0, msg: 'success' },
     });
     const model = mockModel({
-      elements: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 9 }],
+      has_progress: true,
+      title: '重大消息',
+      summary: '',
+      source: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 8 }],
     });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });
 
     expect(result.createdCount).toBe(1);
-    expect(result.notifiedCount).toBe(2); // 两个渠道各通知一次
+    expect(result.notifiedCount).toBe(2);
     const run = taskRunService.get(1, result.runId);
     expect(run.status).toBe('success');
-    const update = db
-      .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
-      .get() as any;
-    expect(update.is_notified).toBe(1);
   });
 
-  it('marks partial when one of multiple channels fails', async () => {
+  it('marks failed when one of multiple channels fails', async () => {
     const defId = (db.prepare('SELECT id FROM notification_channel WHERE is_default = 1 LIMIT 1').get() as { id: number }).id;
     const ch2 = db
       .prepare(
@@ -289,19 +373,18 @@ describe('runCheck', () => {
       'other.feishu.cn': { code: 19021, msg: 'sign fail' },
     });
     const model = mockModel({
-      elements: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 9 }],
+      has_progress: true,
+      title: '重大消息',
+      summary: '',
+      source: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 8 }],
     });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });
 
     expect(result.createdCount).toBe(1);
-    expect(result.notifiedCount).toBe(1); // 仅一个渠道成功
+    expect(result.notifiedCount).toBe(1);
     const run = taskRunService.get(1, result.runId);
-    expect(run.status).toBe('partial');
+    expect(run.status).toBe('failed');
     expect(run.error_type).toBe('notify_failed');
-    const update = db
-      .prepare('SELECT is_notified FROM "update" WHERE id = (SELECT MAX(id) FROM "update")')
-      .get() as any;
-    expect(update.is_notified).toBe(1); // 成功渠道已发出 → 标记已通知
   });
 });

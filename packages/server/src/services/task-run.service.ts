@@ -7,13 +7,13 @@ export interface TaskRunRow {
   user_id: number;
   task_id: number;
   interest_id: number;
+  run_mode: string;
   status: string;
   started_at: string;
   finished_at: string | null;
   duration_ms: number | null;
-  search_query: string | null;
   search_result_count: number | null;
-  updates_created_count: number | null;
+  sources_created_count: number | null;
   llm_input_tokens: number | null;
   llm_output_tokens: number | null;
   llm_total_cost: number | null;
@@ -63,13 +63,13 @@ export interface LlmUsage {
 }
 
 export const taskRunService = {
-  start(userId: number, taskId: number, interestId: number): number {
+  start(userId: number, taskId: number, interestId: number, runMode = 'default'): number {
     const result = db
       .prepare(
-        `INSERT INTO task_run (user_id, task_id, interest_id, status, started_at)
-         VALUES (?, ?, ?, 'running', ?)`,
+        `INSERT INTO task_run (user_id, task_id, interest_id, run_mode, status, started_at)
+         VALUES (?, ?, ?, ?, 'running', ?)`,
       )
-      .run(userId, taskId, interestId, nowUtc());
+      .run(userId, taskId, interestId, runMode, nowUtc());
     return Number(result.lastInsertRowid);
   },
 
@@ -108,9 +108,8 @@ export const taskRunService = {
     userId: number,
     id: number,
     stats: {
-      searchQuery?: string;
       searchResultCount?: number;
-      updatesCreated?: number;
+      sourcesCreated?: number;
       llmInputTokens?: number;
       llmOutputTokens?: number;
       agentSteps?: number;
@@ -126,17 +125,16 @@ export const taskRunService = {
     db.prepare(
       `UPDATE task_run
        SET status = 'success', finished_at = ?, duration_ms = ?,
-           search_query = ?, search_result_count = ?,
-           updates_created_count = ?,
+           search_result_count = ?,
+           sources_created_count = ?,
            llm_input_tokens = ?, llm_output_tokens = ?,
            agent_steps = ?, trace = ?, trace_text = ?
        WHERE id = ? AND user_id = ?`,
     ).run(
       finishedAt,
       durationMs,
-      stats.searchQuery ?? run.search_query,
       stats.searchResultCount ?? run.search_result_count,
-      stats.updatesCreated ?? run.updates_created_count,
+      stats.sourcesCreated ?? run.sources_created_count,
       stats.llmInputTokens ?? run.llm_input_tokens,
       stats.llmOutputTokens ?? run.llm_output_tokens,
       stats.agentSteps ?? run.agent_steps,
@@ -147,29 +145,16 @@ export const taskRunService = {
     );
   },
 
-  partial(
+  fail(
     userId: number,
     id: number,
     errorType: RunErrorType,
     error: Error,
-    usage?: LlmUsage,
-    updatesCreated?: number,
-  ): void {
-    taskRunService.finish(userId, id, 'partial', errorType, error, usage, updatesCreated);
-  },
-
-  fail(userId: number, id: number, errorType: RunErrorType, error: Error): void {
-    taskRunService.finish(userId, id, 'failed', errorType, error);
-  },
-
-  finish(
-    userId: number,
-    id: number,
-    status: 'partial' | 'failed',
-    errorType: RunErrorType,
-    error: Error,
-    usage?: LlmUsage,
-    updatesCreated?: number,
+    stats: {
+      llmInputTokens?: number;
+      llmOutputTokens?: number;
+      sourcesCreated?: number;
+    } = {},
   ): void {
     const run = taskRunService.get(userId, id);
     const started = new Date(run.started_at + 'Z').getTime();
@@ -178,20 +163,19 @@ export const taskRunService = {
 
     db.prepare(
       `UPDATE task_run
-       SET status = ?, finished_at = ?, duration_ms = ?,
+       SET status = 'failed', finished_at = ?, duration_ms = ?,
            error_type = ?, error_message = ?,
-           updates_created_count = ?,
+           sources_created_count = ?,
            llm_input_tokens = ?, llm_output_tokens = ?
        WHERE id = ? AND user_id = ?`,
     ).run(
-      status,
       finishedAt,
       durationMs,
       errorType,
       error.message,
-      updatesCreated ?? run.updates_created_count,
-      usage?.inputTokens ?? run.llm_input_tokens,
-      usage?.outputTokens ?? run.llm_output_tokens,
+      stats.sourcesCreated ?? run.sources_created_count,
+      stats.llmInputTokens ?? run.llm_input_tokens,
+      stats.llmOutputTokens ?? run.llm_output_tokens,
       id,
       userId,
     );

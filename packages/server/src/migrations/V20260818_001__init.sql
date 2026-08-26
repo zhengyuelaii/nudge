@@ -1,9 +1,12 @@
 -- ============================================================
 -- Nudge 初始化迁移 V20260818_001__init
 -- Target: SQLite 3.35+
--- 说明: 7 张表 + 索引 + 初始数据
+-- 说明: 9 张表（含 notify_log 通知日志）+ 索引 + 初始数据
 --       所有业务/配置表预留 user_id（默认 1 = 默认用户），
 --       为后续多用户系统预留；schema_migration 为全局表不带 user_id。
+--       task_run → interest_event → source 三层结构。
+--       旧 "update" 表已废弃（P1 删除）。
+--       notify_log 记录每次通知发送（无论成败），用于追溯与失败排查。
 -- 执行前确保 PRAGMA foreign_keys = ON
 -- ============================================================
 
@@ -60,13 +63,13 @@ CREATE TABLE IF NOT EXISTS task_run (
   user_id              INTEGER NOT NULL DEFAULT 1,
   task_id              INTEGER NOT NULL,
   interest_id          INTEGER NOT NULL,
-  status               TEXT    NOT NULL CHECK (status IN ('running', 'success', 'failed', 'partial')),
+  run_mode             TEXT    NOT NULL DEFAULT 'default',
+  status               TEXT    NOT NULL CHECK (status IN ('running', 'success', 'failed')),
   started_at           TEXT    NOT NULL,
   finished_at          TEXT,
   duration_ms          INTEGER,
-  search_query         TEXT,
   search_result_count  INTEGER,
-  updates_created_count INTEGER,
+  sources_created_count INTEGER,
   llm_input_tokens     INTEGER,
   llm_output_tokens    INTEGER,
   llm_total_cost       REAL,
@@ -86,39 +89,51 @@ CREATE INDEX IF NOT EXISTS idx_run_user_status     ON task_run(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_run_user_started    ON task_run(user_id, started_at DESC);
 
 -- ------------------------------------------------------------
--- 4. update — 变化记录
---    user_id 冗余自 interest，方便按用户查时间线/未读/Dashboard
---    注意: "update" 是 SQL 保留字，需双引号包裹
+-- 4. interest_event — 兴趣更新事件（仅产生更新时才写入）
+--    一条 event 对应多条 source，是「这个兴趣什么时刻冒出了哪些更新」的聚合头
 -- ------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS "update" (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id         INTEGER NOT NULL DEFAULT 1,
-  interest_id     INTEGER NOT NULL,
-  task_run_id     INTEGER,
-  title           TEXT    NOT NULL,
-  summary         TEXT,
-  source_url      TEXT,
-  source_name     TEXT,
-  published_at    TEXT,
-  importance      INTEGER NOT NULL CHECK (importance BETWEEN 1 AND 10),
-  has_progress    INTEGER NOT NULL DEFAULT 0 CHECK (has_progress IN (0, 1)),
-  is_read         INTEGER NOT NULL DEFAULT 0 CHECK (is_read IN (0, 1)),
-  is_notified     INTEGER NOT NULL DEFAULT 0 CHECK (is_notified IN (0, 1)),
-  notified_at     TEXT,
-  content_hash    TEXT    UNIQUE,
-  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (interest_id) REFERENCES interest(id)   ON DELETE CASCADE,
-  FOREIGN KEY (task_run_id) REFERENCES task_run(id)   ON DELETE SET NULL
+CREATE TABLE IF NOT EXISTS interest_event (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL DEFAULT 1,
+  interest_id   INTEGER NOT NULL,
+  task_run_id   INTEGER,
+  title         TEXT    NOT NULL,
+  run_at        TEXT    NOT NULL,
+  source_count  INTEGER NOT NULL DEFAULT 0,
+  summary       TEXT,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (interest_id) REFERENCES interest(id) ON DELETE CASCADE,
+  FOREIGN KEY (task_run_id) REFERENCES task_run(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_update_user_interest_published ON "update"(user_id, interest_id, published_at DESC);
-CREATE INDEX IF NOT EXISTS idx_update_user_importance          ON "update"(user_id, importance DESC);
-CREATE INDEX IF NOT EXISTS idx_update_user_created             ON "update"(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_update_user_unread             ON "update"(user_id, is_read) WHERE is_read = 0;
+CREATE INDEX IF NOT EXISTS idx_event_user ON interest_event(user_id);
+CREATE INDEX IF NOT EXISTS idx_event_user_interest ON interest_event(user_id, interest_id, run_at DESC);
 
 -- ------------------------------------------------------------
--- 5. settings — 用户配置 (每用户一行)
+-- 5. source — 变化来源
+--    一条 source 必须归属一条 interest_event
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS source (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL DEFAULT 1,
+  interest_id   INTEGER NOT NULL,
+  event_id      INTEGER NOT NULL,
+  title         TEXT    NOT NULL,
+  summary       TEXT,
+  source_url    TEXT,
+  source_name   TEXT,
+  published_at  TEXT,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (interest_id) REFERENCES interest(id) ON DELETE CASCADE,
+  FOREIGN KEY (event_id) REFERENCES interest_event(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_user_interest_published ON source(user_id, interest_id, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_source_user_created ON source(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_source_user_event ON source(user_id, event_id);
+
+-- ------------------------------------------------------------
+-- 6. settings — 用户配置 (每用户一行)
 --    预留多用户：UNIQUE(user_id) 保证每用户一行
 --    单用户自托管场景下 user_id 恒为 1
 -- ------------------------------------------------------------
@@ -131,25 +146,22 @@ CREATE TABLE IF NOT EXISTS settings (
   search_provider   TEXT    DEFAULT 'tavily',
   search_api_key    TEXT,
   timezone          TEXT    NOT NULL DEFAULT 'Asia/Shanghai',
-  notify_threshold  INTEGER NOT NULL DEFAULT 7 CHECK (notify_threshold BETWEEN 1 AND 10),
-  agent_max_steps       INTEGER DEFAULT 8,
-  agent_trace_enabled   INTEGER DEFAULT 0,
-  notify_guard          INTEGER DEFAULT 0,
-  use_agent_loop        INTEGER DEFAULT 0,
-  locale                TEXT    NOT NULL DEFAULT 'zh-CN',
+  locale            TEXT    NOT NULL DEFAULT 'zh-CN',
+  run_mode          TEXT    NOT NULL DEFAULT 'default' CHECK (run_mode IN ('default', 'agent')),
+  extra             TEXT,    -- JSON 扩展配置
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (user_id)
 );
 
 -- ------------------------------------------------------------
--- 6. notification_channel — 通知渠道
+-- 7. notification_channel — 通知渠道
 --    每用户可配置多个渠道；每用户至多一个默认渠道（部分唯一索引）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS notification_channel (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id      INTEGER NOT NULL DEFAULT 1,
-  type         TEXT    NOT NULL CHECK (type IN ('feishu', 'dingtalk', 'email')),
+  type         TEXT    NOT NULL CHECK (type IN ('feishu', 'email')),
   name         TEXT    NOT NULL,
   config       TEXT    NOT NULL,  -- JSON
   enabled      INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
@@ -163,7 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_user_type ON notification_channel(user_id
 CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_user_default ON notification_channel(user_id) WHERE is_default = 1;
 
 -- ------------------------------------------------------------
--- 7. schema_migration — 迁移版本（全局，不带 user_id）
+-- 8. schema_migration — 迁移版本（全局，不带 user_id）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schema_migration (
   version     TEXT PRIMARY KEY,
@@ -173,27 +185,29 @@ CREATE TABLE IF NOT EXISTS schema_migration (
 );
 
 -- ------------------------------------------------------------
--- 8. interest_state — 跨轮结构化状态（程序维护；固定流程每轮读取并确定性写回）
+-- 9. notify_log — 通知发送日志（每次发送无论成败都记一条）
+--     channel_id / interest_id / event_id 关联来源；status 标记成功/失败
 -- ------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS interest_state (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id           INTEGER NOT NULL DEFAULT 1,
-  interest_id       INTEGER NOT NULL,
-  summary           TEXT,
-  key_points        TEXT,            -- JSON array
-  query_hints       TEXT,            -- JSON array: 下次查询建议（程序依据 tags/上次结果生成）
-  last_checked_at   TEXT,
-  no_change_streak  INTEGER NOT NULL DEFAULT 0,
-  last_query        TEXT,            -- 本轮实际查询词（含 tags 增强），下轮据此换角度避免重复召回
-  last_result_count INTEGER,         -- 本轮搜索结果数，辅助判断召回质量
-  last_change_at    TEXT,            -- 最近一次产生变化的时刻，供「无变化」判断
-  created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(interest_id),
-  FOREIGN KEY(interest_id) REFERENCES interest(id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS notify_log (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       INTEGER NOT NULL DEFAULT 1,
+  channel_id    INTEGER,
+  interest_id   INTEGER,
+  event_id      INTEGER,
+  title         TEXT,
+  content       TEXT    NOT NULL,
+  status        TEXT    NOT NULL CHECK (status IN ('success', 'failed')),
+  error_message TEXT,
+  sent_at       TEXT    NOT NULL,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (channel_id)  REFERENCES notification_channel(id) ON DELETE SET NULL,
+  FOREIGN KEY (interest_id) REFERENCES interest(id)           ON DELETE CASCADE,
+  FOREIGN KEY (event_id)    REFERENCES interest_event(id)     ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_interest_state_user ON interest_state(user_id);
+CREATE INDEX IF NOT EXISTS idx_notify_log_user_sent      ON notify_log(user_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notify_log_user_channel   ON notify_log(user_id, channel_id);
+CREATE INDEX IF NOT EXISTS idx_notify_log_user_interest  ON notify_log(user_id, interest_id, sent_at DESC);
 
 -- ============================================================
 -- 初始数据（默认用户 user_id = 1）

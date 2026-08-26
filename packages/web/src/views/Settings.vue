@@ -38,11 +38,9 @@ interface Settings {
   ai_model: string | null;
   search_provider: string;
   search_api_key: string | null;
-  use_agent_loop: number;
-  agent_max_steps: number;
-  agent_trace_enabled: number;
-  notify_guard: number;
   locale: string;
+  run_mode: string;
+  extra: string | null;
 }
 
 interface Channel {
@@ -58,7 +56,12 @@ const ai = reactive({ baseUrl: '', apiKey: '', model: '' });
 const search = reactive({ provider: 'tavily', apiKey: '' });
 const feishu = reactive({ webhookUrl: '', secret: '' });
 const email = reactive({ smtpHost: '', smtpPort: '465', from: '', password: '', to: '' });
-const general = reactive({ useAgentLoop: false, agentMaxSteps: 8, agentTraceEnabled: false, notifyGuard: false, locale: 'zh-CN' });
+const general = reactive({ runMode: 'default' as 'default' | 'agent', agentTraceEnabled: false, locale: 'zh-CN' });
+const agentMode = computed({
+  get: () => general.runMode === 'agent',
+  set: (v: boolean) => { general.runMode = v ? 'agent' : 'default'; },
+});
+
 
 // 已存在渠道 id：有则 PUT 更新，无则 POST 创建并记下 id，避免重复创建
 const channelId: Record<string, number> = {};
@@ -122,10 +125,10 @@ onMounted(async () => {
     ai.model = s.ai_model ?? '';
     search.provider = s.search_provider;
     search.apiKey = s.search_api_key ?? '';
-    general.useAgentLoop = !!s.use_agent_loop;
-    general.agentMaxSteps = s.agent_max_steps ?? 8;
-    general.agentTraceEnabled = !!s.agent_trace_enabled;
-    general.notifyGuard = !!s.notify_guard;
+    general.runMode = s.run_mode === 'agent' ? 'agent' : 'default';
+    let extra: Record<string, unknown> = {};
+    try { extra = s.extra ? JSON.parse(s.extra) : {}; } catch {}
+    general.agentTraceEnabled = !!extra.agent_trace_enabled;
     general.locale = s.locale ?? 'zh-CN';
     chs.forEach((c) => {
       channelId[c.type] = c.id;
@@ -147,10 +150,8 @@ async function persistSettings() {
     aiModel: ai.model || '',
     searchProvider: search.provider || 'tavily',
     searchApiKey: search.apiKey || '',
-    useAgentLoop: general.useAgentLoop ? 1 : 0,
-    agentMaxSteps: general.agentMaxSteps,
-    agentTraceEnabled: general.agentTraceEnabled ? 1 : 0,
-    notifyGuard: general.notifyGuard ? 1 : 0,
+    runMode: general.runMode,
+    extra: { agent_trace_enabled: general.agentTraceEnabled },
     locale: general.locale,
   });
 }
@@ -269,19 +270,14 @@ async function sendTest(type: string) {
                 </div>
 
                 <div class="border-t border-gray-100 pt-4">
-                  <h3 class="mb-3 text-sm font-medium text-gray-700">Agent 巡检</h3>
+                  <h3 class="mb-3 text-sm font-medium text-gray-700">巡检模式</h3>
                   <div class="space-y-4">
                     <div class="flex items-center justify-between">
                       <div>
-                        <Label>启用 Agent 模式</Label>
+                        <Label>Agent 模式</Label>
                         <p class="text-xs text-muted-foreground">开启后使用 AI Agent 循环巡检，关闭则使用固定流水线</p>
                       </div>
-                      <Switch v-model:checked="general.useAgentLoop" />
-                    </div>
-                    <div v-if="general.useAgentLoop" class="space-y-2">
-                      <Label>最大步数</Label>
-                      <Input v-model.number="general.agentMaxSteps" type="number" min="1" max="50" class="w-24" />
-                      <p class="text-xs text-muted-foreground">Agent 单次巡检最大循环步数（1-50）</p>
+                      <Switch v-model="agentMode" />
                     </div>
                     <div class="flex items-center justify-between">
                       <div>
@@ -289,13 +285,6 @@ async function sendTest(type: string) {
                         <p class="text-xs text-muted-foreground">记录 Agent 每步执行轨迹，便于排查</p>
                       </div>
                       <Switch v-model:checked="general.agentTraceEnabled" />
-                    </div>
-                    <div class="flex items-center justify-between">
-                      <div>
-                        <Label>通知安全网</Label>
-                        <p class="text-xs text-muted-foreground">开启后 Agent 通知前校验是否有重要度达标的变化</p>
-                      </div>
-                      <Switch v-model:checked="general.notifyGuard" />
                     </div>
                   </div>
                 </div>

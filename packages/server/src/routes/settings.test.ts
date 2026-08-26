@@ -16,7 +16,6 @@ describe('GET /api/settings', () => {
     expect(body.data.user_id).toBe(1);
     expect(body.data.search_provider).toBe('tavily');
     expect(body.data.timezone).toBe('Asia/Shanghai');
-    expect(body.data.notify_threshold).toBe(7);
     expect(body.data.ai_api_key).toBeNull();
     expect(body.data.ai_base_url).toBeNull();
   });

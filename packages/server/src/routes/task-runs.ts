@@ -5,7 +5,7 @@ import { jsonOk, jsonError } from '../lib/http.js';
 
 const listRunsQuery = z.object({
   interest_id: z.coerce.number().int().positive().optional(),
-  status: z.enum(['running', 'success', 'failed', 'partial']).optional(),
+  status: z.enum(['running', 'success', 'failed']).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
 });

@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { signFeishu, sendFeishu, sendEmail, notify } from './index.js';
+import { db } from '../db/client.js';
 
 const WEBHOOK =
   process.env.FEISHU_TEST_WEBHOOK ??
@@ -181,5 +182,48 @@ describe('notify', () => {
         'hello',
       ),
     ).rejects.toThrow('不支持的渠道类型: dingtalk');
+  });
+});
+
+describe('notify writes notify_log', () => {
+  beforeEach(() => {
+    db.exec('DELETE FROM notify_log');
+  });
+
+  it('writes a success entry after a successful send', async () => {
+    const { impl } = mockFetch({ code: 0, msg: 'success' });
+
+    await notify(
+      { type: 'feishu', config: JSON.stringify({ webhook_url: WEBHOOK, secret: SECRET }), id: 1 },
+      'hello',
+      { fetchImpl: impl, meta: { userId: 1, title: 't' } },
+    );
+
+    const rows = db
+      .prepare('SELECT * FROM notify_log')
+      .all() as Array<{ status: string; channel_id: number | null; content: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('success');
+    expect(rows[0].channel_id).toBe(1);
+    expect(rows[0].content).toBe('hello');
+  });
+
+  it('writes a failed entry (with error_message) when send fails', async () => {
+    const { impl } = mockFetch({}, 500);
+
+    await expect(
+      notify(
+        { type: 'feishu', config: JSON.stringify({ webhook_url: WEBHOOK }), id: 1 },
+        'hello',
+        { fetchImpl: impl, meta: { channelId: 1 } },
+      ),
+    ).rejects.toThrow();
+
+    const rows = db
+      .prepare('SELECT * FROM notify_log')
+      .all() as Array<{ status: string; error_message: string | null }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].error_message).toBeTruthy();
   });
 });

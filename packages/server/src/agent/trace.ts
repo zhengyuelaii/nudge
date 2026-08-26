@@ -90,14 +90,14 @@ export function renderTrace(events: TraceEvent[]): string {
       if (event.tool === 'web_search') {
         const input = event.input as { query?: string; timeRange?: string } | undefined;
         lines.push(`> WebSearch: ${input?.query ?? ''}/${input?.timeRange ?? ''}`);
-      } else if (event.tool === 'save_update') {
+      } else if (event.tool === 'save_source') {
         // handled in tool_result
       }
     } else if (event.kind === 'tool_result') {
       if (event.tool === 'web_search') {
         lines.push(`> 查询结果 ${event.summary ?? ''}`);
-      } else if (event.tool === 'save_update') {
-        lines.push(`> Save_Updates: ${event.summary ?? ''}`);
+      } else if (event.tool === 'save_source') {
+        lines.push(`> Save_Sources: ${event.summary ?? ''}`);
       } else if (event.tool === 'notify_user') {
         lines.push(`> Notify: ${event.summary ?? ''}`);
       }

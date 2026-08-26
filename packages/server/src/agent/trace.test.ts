@@ -52,12 +52,12 @@ describe('renderTrace', () => {
     expect(rendered).toContain('> 查询结果 查询结果 10 条');
   });
 
-  it('renders tool_result save_update', () => {
+  it('renders tool_result save_source', () => {
     const events: TraceEvent[] = [
-      { kind: 'tool_result', tool: 'save_update', summary: '保存1条新动态', at: '' },
+      { kind: 'tool_result', tool: 'save_source', summary: '保存1条新来源', at: '' },
     ];
     const rendered = renderTrace(events);
-    expect(rendered).toContain('> Save_Updates: 保存1条新动态');
+    expect(rendered).toContain('> Save_Sources: 保存1条新来源');
   });
 
   it('renders tool_result notify_user', () => {

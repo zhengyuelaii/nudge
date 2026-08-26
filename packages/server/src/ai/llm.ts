@@ -4,23 +4,23 @@ import { z } from 'zod';
 import { Errors } from '../lib/errors.js';
 import type { SearchResult } from './search.js';
 
-export interface AnalyzedUpdate {
+export interface AnalyzedSource {
   title: string;
-  summary: string;
   source_url: string;
   source_name: string;
   published_at: string;
   importance: number;
-  has_progress: boolean;
 }
 
-export const analyzedUpdateSchema = z.object({
-  title: z.string().describe('变化的标题，简明扼要'),
-  summary: z
-    .string()
-    .optional()
-    .describe('变化的中文摘要，1-3 句话（可用 description 代替）'),
-  description: z.string().optional().describe('摘要的别名，与 summary 等价'),
+export interface AnalyzedResult {
+  has_progress: boolean;
+  title: string;
+  summary: string;
+  source: AnalyzedSource[];
+}
+
+export const analyzedSourceSchema = z.object({
+  title: z.string().describe('来源标题'),
   source_url: z.string().url().optional().describe('来源链接'),
   source_name: z.string().optional().describe('来源名称，如「东方财富」'),
   published_at: z.string().optional().describe('信息原始发布时间，ISO 8601'),
@@ -28,21 +28,15 @@ export const analyzedUpdateSchema = z.object({
     .number()
     .optional()
     .describe('重要度 1-10：1-3 无关 / 4-6 一般 / 7-8 重要 / 9-10 重大'),
-  has_progress: z
-    .boolean()
-    .optional()
-    .describe('相比目前已知状态是否有实质进展（新变化/进展/重要动态），否则为 false'),
 });
 
-function toAnalyzedUpdate(raw: z.infer<typeof analyzedUpdateSchema>): AnalyzedUpdate {
+function toAnalyzedSource(raw: z.infer<typeof analyzedSourceSchema>): AnalyzedSource {
   return {
     title: raw.title,
-    summary: raw.summary ?? raw.description ?? '',
     source_url: raw.source_url ?? '',
     source_name: raw.source_name ?? '',
     published_at: raw.published_at ?? '',
     importance: raw.importance ?? 5,
-    has_progress: raw.has_progress ?? false,
   };
 }
 
@@ -62,11 +56,17 @@ export interface AnalyzeOptions {
 }
 
 const outputSchema = z.object({
-  elements: z.array(analyzedUpdateSchema),
+  has_progress: z.boolean().describe('相比目前已知状态是否有实质进展（新变化/进展/重要动态），否则为 false'),
+  title: z.string().describe('本轮更新的事件标题，简明扼要'),
+  summary: z.string().describe('本轮变化的中文摘要，1-3 句话'),
+  source: z.array(analyzedSourceSchema).describe('构成本轮进展的来源列表，最多 8 条'),
 });
 
 export interface AnalyzeResult {
-  updates: AnalyzedUpdate[];
+  has_progress: boolean;
+  title: string;
+  summary: string;
+  source: AnalyzedSource[];
   usage: LlmUsage;
 }
 
@@ -109,12 +109,13 @@ ${results
     .join('\n\n')}
 
 输出规则：
-1. importance 为目标估值 1-10：重大(9-10)/重要(7-8)/一般(4-6)/无关(1-3)
-2. source_url 和 source_name 必须从上方搜索结果中提取，不许编造
-3. has_progress=true 表示相比目前已知状态有实质进展（新变化/新进展），false 表示只是已知信息的重复或无关内容
-4. 忽略无关、过时、重复信息；若没有重要变化，返回 {"elements": []}
+1. has_progress=true 表示相比目前已知状态有实质进展（新变化/新进展），false 表示只是已知信息的重复或无关内容
+2. title 为本轮更新的事件标题，summary 为本轮变化的中文摘要（1-3 句）
+3. source 数组列出构成本轮进展的来源，最多 8 条；source 内 importance 为目标估值 1-10：重大(9-10)/重要(7-8)/一般(4-6)/无关(1-3)，无关来源不要放进 source
+4. source_url 和 source_name 必须从上方搜索结果中提取，不许编造
+5. 忽略无关、过时、重复信息；若没有重要变化，返回 {"has_progress": false, "title": "", "summary": "", "source": []}
 
-必须输出一个 JSON 对象，格式为 {"elements": [{"title": "标题", "summary": "1-3句摘要", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "importance": 8, "has_progress": true}]}，不要输出其它内容。`;
+必须输出一个 JSON 对象，格式为 {"has_progress": true, "title": "标题", "summary": "1-3句摘要", "source": [{"title": "来源标题", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "importance": 8}]}，不要输出其它内容。`;
 
   const result = await generateText({
     model,
@@ -131,10 +132,15 @@ ${results
   };
 
   const parsed = outputSchema.safeParse(result.output ?? {});
+  if (!parsed.success) {
+    return { has_progress: false, title: '', summary: '', source: [], usage };
+  }
+  const { has_progress, title, summary, source } = parsed.data;
   return {
-    updates: parsed.success
-      ? parsed.data.elements.map(toAnalyzedUpdate)
-      : [],
+    has_progress,
+    title,
+    summary,
+    source: source.map(toAnalyzedSource),
     usage,
   };
 }

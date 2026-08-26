@@ -1,23 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { api } from '../api/index.js';
-import { Badge } from '@/components/ui/badge';
 
-interface Update {
+interface Source {
   id: number;
   title: string;
-  source_name: string | null;
+  summary: string | null;
   source_url: string | null;
-  interest_tags: string[];
-  interest_name: string | null;
-  importance: number;
-  has_progress: number;
+  source_name: string | null;
+  published_at: string | null;
   created_at: string;
-  is_read: number;
+  event_title: string | null;
+  interest_name: string | null;
+  interest_tags: string[];
 }
 
 const activeTag = ref('all');
-const updates = ref<Update[]>([]);
+const sources = ref<Source[]>([]);
 const loading = ref(true);
 const loadingMore = ref(false);
 const finished = ref(false);
@@ -44,8 +43,8 @@ async function loadMore() {
   loadingMore.value = true;
   try {
     const suffix = pageOffset > 0 ? `&offset=${pageOffset}` : '';
-    const data = await api.get<Update[]>(`/updates?limit=${PAGE_SIZE}${suffix}`);
-    updates.value.push(...data);
+    const data = await api.get<Source[]>(`/sources?limit=${PAGE_SIZE}${suffix}`);
+    sources.value.push(...data);
     if (data.length < PAGE_SIZE) {
       finished.value = true;
     } else {
@@ -74,18 +73,18 @@ onBeforeUnmount(() => observer?.disconnect());
 
 const filteredCategories = computed(() => {
   const tags = new Set<string>();
-  for (const u of updates.value) {
-    for (const t of u.interest_tags) tags.add(t);
+  for (const s of sources.value) {
+    for (const t of s.interest_tags) tags.add(t);
   }
   return [...tags];
 });
 
-const filteredUpdates = computed(() => {
-  if (activeTag.value === 'all') return updates.value;
-  return updates.value.filter((u) => u.interest_tags.includes(activeTag.value));
+const filteredSources = computed(() => {
+  if (activeTag.value === 'all') return sources.value;
+  return sources.value.filter((s) => s.interest_tags.includes(activeTag.value));
 });
 
-function openOriginal(item: Update) {
+function openOriginal(item: Source) {
   if (!item.source_url) return;
   window.open(item.source_url, '_blank', 'noopener');
 }
@@ -112,15 +111,23 @@ function openOriginal(item: Update) {
       </button>
     </div>
 
-    <div v-if="loading" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">加载中...</div>
+    <div v-if="loading" class="divide-y divide-gray-200 border border-gray-200 bg-white">
+      <div v-for="i in 3" :key="i" class="px-4 py-3">
+        <div class="mb-2 h-4 w-3/4 animate-pulse rounded bg-gray-200"></div>
+        <div class="flex gap-3">
+          <div class="h-3 w-16 animate-pulse rounded bg-gray-100"></div>
+          <div class="h-3 w-12 animate-pulse rounded bg-gray-100"></div>
+        </div>
+      </div>
+    </div>
 
-    <div v-else-if="filteredUpdates.length === 0 && finished" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
+    <div v-else-if="filteredSources.length === 0 && finished" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
       暂无动态
     </div>
 
     <div v-else class="divide-y divide-gray-200 border border-gray-200 bg-white">
       <div
-        v-for="item in filteredUpdates"
+        v-for="item in filteredSources"
         :key="item.id"
         class="flex cursor-pointer flex-col gap-1 px-4 py-3 transition-colors hover:bg-gray-50"
         :class="item.source_url ? '' : 'cursor-default'"
@@ -132,12 +139,8 @@ function openOriginal(item: Update) {
         </div>
         <div class="flex items-center gap-3 text-xs text-gray-400">
           <span>{{ item.source_name ?? '未知来源' }}</span>
-          <Badge v-if="item.importance >= 7" variant="destructive">
-            {{ item.importance }}分
-          </Badge>
-          <Badge v-if="item.has_progress" variant="secondary" class="text-green-700">
-            有进展
-          </Badge>
+          <span v-if="item.interest_name" class="text-gray-300">·</span>
+          <span v-if="item.interest_name">{{ item.interest_name }}</span>
           <span class="ml-auto">{{ timeAgo(item.created_at) }}</span>
         </div>
       </div>
@@ -145,7 +148,7 @@ function openOriginal(item: Update) {
 
     <div ref="sentinel" class="py-3"></div>
     <div v-if="loadingMore" class="pb-4 text-center text-xs text-gray-400">加载中...</div>
-    <div v-else-if="finished && updates.length > 0" class="pb-4 text-center text-xs text-gray-400">
+    <div v-else-if="finished && sources.length > 0" class="pb-4 text-center text-xs text-gray-400">
       已经到底啦，没有更多了
     </div>
   </div>

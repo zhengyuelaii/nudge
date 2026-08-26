@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../db/client.js';
 import { buildTools, type ToolContext } from './tools.js';
 import { createTrace } from './trace.js';
-import { stateService } from '../services/state.service.js';
 
 let seedInterestId = 0;
 let seedTaskId = 0;
@@ -23,12 +22,12 @@ function seed(): void {
   seedRunId = Number(run.lastInsertRowid);
 
   db.prepare(
-    "UPDATE settings SET search_api_key = 'tvly-test', ai_api_key = 'sk-test', notify_threshold = 7 WHERE user_id = 1",
+    "UPDATE settings SET search_api_key = 'tvly-test', ai_api_key = 'sk-test' WHERE user_id = 1",
   ).run();
 }
 
 beforeEach(() => {
-  db.exec('DELETE FROM "update"; DELETE FROM task_run; DELETE FROM interest_state; DELETE FROM task; DELETE FROM interest;');
+  db.exec('DELETE FROM source; DELETE FROM interest_event; DELETE FROM task_run; DELETE FROM task; DELETE FROM interest;');
   seed();
 });
 
@@ -36,7 +35,7 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
     userId: 1,
     interest: { id: seedInterestId, name: '华友钴业', tags: ['company'], query_keywords: '华友钴业 股价' },
-    settings: { search_api_key: 'tvly-test', notify_threshold: 7, notify_guard: 0 },
+    settings: { search_api_key: 'tvly-test' },
     runId: seedRunId,
     trace: createTrace({ enabled: false }),
     ...overrides,
@@ -52,62 +51,45 @@ describe('agent tools', () => {
       expect(result.key_points).toEqual([]);
     });
 
-    it('returns existing state', async () => {
-      stateService.upsert(1, seedInterestId, {
-        summary: '黄金价格稳定',
-        key_points: ['价格在 2000'],
-        query_hints_next: ['关注美联储'],
-        has_new_progress: true,
-        last_checked_at: '2026-01-01 00:00:00',
-      });
+    it('returns state derived from recent events', async () => {
+      const event = db.prepare(
+        "INSERT INTO interest_event (user_id, interest_id, title, run_at) VALUES (1, ?, ?, datetime('now'))",
+      ).run(seedInterestId, '黄金价格稳定');
+      const eventId = Number(event.lastInsertRowid);
+      db.prepare(
+        'INSERT INTO source (user_id, interest_id, event_id, title) VALUES (1, ?, ?, ?)',
+      ).run(seedInterestId, eventId, '价格在 2000');
 
       const tools = buildTools(makeCtx());
       const result = await (tools.get_last_state.execute as Function)({});
       expect(result.summary).toBe('黄金价格稳定');
-      expect(result.key_points).toEqual(['价格在 2000']);
+      expect(result.key_points).toContain('价格在 2000');
     });
   });
 
-  describe('save_update', () => {
-    it('saves an update to the database', async () => {
+  describe('save_source', () => {
+    it('saves a source to the database', async () => {
       const tools = buildTools(makeCtx());
-      const result = await (tools.save_update.execute as Function)({
+      const result = await (tools.save_source.execute as Function)({
         title: '华友钴业净利创新高',
         summary: '营收增长',
         source_url: 'https://example.com/news/1',
         source_name: '东方财富',
-        importance: 9,
-        has_progress: true,
       });
 
       expect(result.saved).toBe(true);
       expect(result.id).toBeDefined();
 
-      const row = db.prepare('SELECT * FROM "update" WHERE id = ?').get(result.id) as any;
-      expect(row.title).toBe('华友钴业净利创新高');
-      expect(row.importance).toBe(9);
-    });
+      const source = db.prepare('SELECT * FROM source WHERE id = ?').get(result.id) as any;
+      expect(source.title).toBe('华友钴业净利创新高');
 
-    it('returns duplicate for same content', async () => {
-      const tools = buildTools(makeCtx());
-      await (tools.save_update.execute as Function)({
-        title: '华友钴业净利创新高',
-        source_url: 'https://example.com/news/1',
-        importance: 9,
-      });
-      const result = await (tools.save_update.execute as Function)({
-        title: '华友钴业净利创新高',
-        source_url: 'https://example.com/news/1',
-        importance: 9,
-      });
-
-      expect(result.saved).toBe(false);
-      expect(result.duplicate).toBe(true);
+      const event = db.prepare('SELECT * FROM interest_event WHERE id = ?').get(source.event_id) as any;
+      expect(event.title).toBe('华友钴业净利创新高');
     });
   });
 
   describe('save_state', () => {
-    it('creates state in the database', async () => {
+    it('returns saved without persisting (no-op until agent refactor)', async () => {
       const tools = buildTools(makeCtx());
       const result = await (tools.save_state.execute as Function)({
         summary: '黄金价格稳定',
@@ -117,10 +99,6 @@ describe('agent tools', () => {
       });
 
       expect(result.saved).toBe(true);
-
-      const state = stateService.get(1, seedInterestId);
-      expect(state).not.toBeNull();
-      expect(state!.summary).toBe('黄金价格稳定');
     });
   });
 
@@ -141,22 +119,27 @@ describe('agent tools', () => {
     });
   });
 
-  describe('get_recent_updates', () => {
-    it('returns empty array when no updates', async () => {
+  describe('get_recent_sources', () => {
+    it('returns empty array when no sources', async () => {
       const tools = buildTools(makeCtx());
-      const result = await (tools.get_recent_updates.execute as Function)({});
+      const result = await (tools.get_recent_sources.execute as Function)({});
       expect(result).toEqual([]);
     });
 
-    it('returns recent updates', async () => {
+    it('returns recent sources', async () => {
+      const event = db.prepare(
+        'INSERT INTO interest_event (user_id, interest_id, title, run_at) VALUES (1, ?, ?, datetime(\'now\'))',
+      ).run(seedInterestId, '测试事件');
+      const eventId = Number(event.lastInsertRowid);
+
       db.prepare(
-        'INSERT INTO "update" (user_id, interest_id, title, importance, has_progress) VALUES (1, ?, ?, ?, ?)',
-      ).run(seedInterestId, '测试更新', 8, 1);
+        'INSERT INTO source (user_id, interest_id, event_id, title) VALUES (1, ?, ?, ?)',
+      ).run(seedInterestId, eventId, '测试来源');
 
       const tools = buildTools(makeCtx());
-      const result = await (tools.get_recent_updates.execute as Function)({ limit: 5 });
+      const result = await (tools.get_recent_sources.execute as Function)({ limit: 5 });
       expect(result).toHaveLength(1);
-      expect(result[0].title).toBe('测试更新');
+      expect(result[0].title).toBe('测试来源');
     });
   });
 });

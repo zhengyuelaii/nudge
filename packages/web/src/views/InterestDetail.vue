@@ -52,16 +52,26 @@ interface Channel {
   is_default: number;
 }
 
-interface Update {
+interface Source {
   id: number;
   title: string;
   summary: string | null;
-  source_name: string | null;
   source_url: string | null;
-  importance: number;
-  has_progress: number;
+  source_name: string | null;
+  published_at: string | null;
+}
+
+interface InterestEvent {
+  id: number;
+  interest_id: number;
+  task_run_id: number | null;
+  title: string;
+  run_at: string;
+  source_count: number;
+  summary: string | null;
   created_at: string;
-  is_read: number;
+  interest_name: string | null;
+  sources: Source[];
 }
 
 interface TaskRun {
@@ -69,20 +79,19 @@ interface TaskRun {
   status: string;
   started_at: string;
   duration_ms: number | null;
-  search_query: string | null;
   search_result_count: number | null;
-  updates_created_count: number | null;
+  sources_created_count: number | null;
   llm_input_tokens: number | null;
   llm_output_tokens: number | null;
   error_type: string | null;
   error_message: string | null;
 }
 
-type RunStatusFilter = '' | 'success' | 'failed' | 'partial' | 'running';
+type RunStatusFilter = '' | 'success' | 'failed' | 'running';
 
 const interest = ref<Interest | null>(null);
-const updates = ref<Update[]>([]);
-const latestUpdates = computed(() => updates.value.slice(0, 3));
+const events = ref<InterestEvent[]>([]);
+const latestEvents = computed(() => events.value.slice(0, 3));
 
 const formErrors = computed<{ name?: string; tags?: string; time?: string }>(() => {
   const e: { name?: string; tags?: string; time?: string } = {};
@@ -117,15 +126,8 @@ const form = ref({
   channelIds: [] as number[],
 });
 
-const importanceBadgeVariant = (n: number): 'destructive' | 'default' | 'secondary' => {
-  if (n >= 8) return 'destructive';
-  if (n >= 6) return 'default';
-  return 'secondary';
-};
-
 const runStatusLabel: Record<string, { text: string; variant: 'destructive' | 'default' | 'secondary' | 'outline' }> = {
   success: { text: '成功', variant: 'secondary' },
-  partial: { text: '部分成功', variant: 'default' },
   failed: { text: '失败', variant: 'destructive' },
   running: { text: '执行中', variant: 'outline' },
 };
@@ -137,7 +139,6 @@ const statusTabs: { key: RunStatusFilter; label: string }[] = [
   { key: '', label: '全部' },
   { key: 'success', label: '成功' },
   { key: 'failed', label: '失败' },
-  { key: 'partial', label: '部分成功' },
   { key: 'running', label: '执行中' },
 ];
 
@@ -163,12 +164,12 @@ async function loadData() {
   try {
     const [i, u, tags, chs] = await Promise.all([
       api.get<Interest>(`/interests/${interestId}`),
-      api.get<Update[]>(`/updates?interest_id=${interestId}`),
+      api.get<InterestEvent[]>(`/events?interest_id=${interestId}`),
       api.get<string[]>('/interests/tags'),
       api.get<Channel[]>('/notification-channels'),
     ]);
     interest.value = i;
-    updates.value = u;
+    events.value = u;
     existingTags.value = tags;
     channels.value = chs;
     form.value = {
@@ -236,10 +237,10 @@ async function triggerCheck() {
     checkResult.value = `检查完成：新增 ${r.createdCount} 条动态，已通知 ${r.notifiedCount} 条`;
     const [i, u] = await Promise.all([
       api.get<Interest>(`/interests/${interestId}`),
-      api.get<Update[]>(`/updates?interest_id=${interestId}`),
+      api.get<InterestEvent[]>(`/events?interest_id=${interestId}`),
     ]);
     interest.value = i;
-    updates.value = u;
+    events.value = u;
     await loadRuns(true);
   } catch (e: any) {
     toast.error('检查失败: ' + e.message);
@@ -408,7 +409,7 @@ function setChannel(id: number, checked: boolean) {
                   :model-value="form.channelIds.includes(ch.id)"
                   :disabled="!ch.enabled"
                   class="cursor-pointer"
-                  @update:model-value="(v: boolean) => setChannel(ch.id, v === true)"
+                  @update:model-value="(v: boolean | 'indeterminate') => setChannel(ch.id, v === true)"
                 />
                 <span>{{ ch.name }}</span>
                 <span v-if="!ch.enabled" class="text-xs text-gray-400">（未启用）</span>
@@ -435,9 +436,9 @@ function setChannel(id: number, checked: boolean) {
       </Card>
 
       <div class="mb-3 flex items-center justify-between border-b border-gray-200 pb-2">
-        <h3 class="text-sm font-bold text-gray-700">相关动态 ({{ updates.length }})</h3>
+        <h3 class="text-sm font-bold text-gray-700">相关动态 ({{ events.length }})</h3>
         <Button
-          v-if="updates.length > 3"
+          v-if="events.length > 3"
           variant="ghost"
           size="sm"
           class="gap-0.5"
@@ -450,39 +451,28 @@ function setChannel(id: number, checked: boolean) {
         </Button>
       </div>
 
-      <div v-if="updates.length === 0" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
+      <div v-if="events.length === 0" class="border border-gray-200 bg-white p-8 text-center text-sm text-gray-400">
         暂无相关动态
       </div>
 
       <div v-else class="overflow-hidden rounded border border-gray-200 bg-white">
         <div
-          v-for="(item, idx) in latestUpdates"
-          :key="item.id"
-          class="flex gap-5 px-5 py-4"
+          v-for="(event, idx) in latestEvents"
+          :key="event.id"
+          class="px-5 py-4"
           :class="idx > 0 ? 'border-t border-gray-100' : ''"
         >
-          <div class="relative flex shrink-0 flex-col items-center pt-1">
-            <span
-              class="z-10 h-3 w-3 rounded-full ring-4 ring-white"
-              :class="item.importance >= 7 ? 'bg-green-500' : 'bg-gray-300'"
-            />
-            <div v-if="idx < latestUpdates.length - 1" class="mt-1 w-px flex-1 bg-gray-200" />
-          </div>
-          <div class="min-w-0 flex-1 pb-1">
-            <div class="mb-1 flex items-center gap-2">
-              <span class="text-xs text-gray-400">{{ timeAgo(item.created_at) }}</span>
-              <Badge :variant="importanceBadgeVariant(item.importance)">
-                {{ item.importance }}分
-              </Badge>
-              <Badge v-if="item.has_progress" variant="secondary" class="text-green-700">
-                有进展
-              </Badge>
-            </div>
-            <h3 class="text-sm font-medium leading-snug text-gray-900">{{ item.title }}</h3>
-            <div v-if="item.summary" class="mt-1 text-xs leading-relaxed text-gray-500">{{ item.summary }}</div>
-            <div class="mt-2 flex items-center gap-2 text-xs text-gray-400">
-              <span>{{ item.source_name ?? '未知来源' }}</span>
-              <a v-if="item.source_url" :href="item.source_url" target="_blank" class="text-blue-500 hover:underline">原文</a>
+          <div class="mb-1 text-xs text-gray-400">{{ timeAgo(event.run_at) }}</div>
+          <h3 class="text-sm font-medium leading-snug text-gray-900">{{ event.title }}</h3>
+          <div v-if="event.summary" class="mt-1 text-xs leading-relaxed text-gray-500">{{ event.summary }}</div>
+          <div v-if="event.sources.length > 0" class="mt-2 space-y-1">
+            <div
+              v-for="source in event.sources"
+              :key="source.id"
+              class="flex items-center gap-2 text-xs text-gray-400"
+            >
+              <span>{{ source.source_name ?? '未知来源' }}</span>
+              <a v-if="source.source_url" :href="source.source_url" target="_blank" class="text-blue-500 hover:underline">原文</a>
             </div>
           </div>
         </div>
@@ -515,12 +505,11 @@ function setChannel(id: number, checked: boolean) {
             {{ runStatusBadge(run.status).text }}
           </Badge>
           <div class="min-w-0 flex-1">
-            <div class="truncate text-xs text-gray-600">{{ run.search_query ?? '—' }}</div>
             <div class="text-[11px] text-gray-400">
               {{ timeAgo(run.started_at) }} · {{ run.duration_ms != null ? (run.duration_ms / 1000).toFixed(1) + 's' : '—' }}
               · 搜索结果 {{ run.search_result_count ?? 0 }} 条
-              <template v-if="run.updates_created_count != null">
-                · 新增 {{ run.updates_created_count }} 条动态
+              <template v-if="run.sources_created_count != null">
+                · 新增 {{ run.sources_created_count }} 条来源
               </template>
               <template v-if="run.llm_input_tokens != null">
                 · 输入 {{ run.llm_input_tokens }} / 输出 {{ run.llm_output_tokens ?? 0 }} tok

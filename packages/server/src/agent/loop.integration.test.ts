@@ -7,7 +7,7 @@ describe.skipIf(!process.env.AI_API_KEY)('runAgentCheck integration (real model)
   let seedTaskId = 0;
 
   beforeEach(() => {
-    db.exec('DELETE FROM "update"; DELETE FROM task_run; DELETE FROM interest_state; DELETE FROM notification_channel; DELETE FROM task; DELETE FROM interest;');
+    db.exec('DELETE FROM source; DELETE FROM interest_event; DELETE FROM task_run; DELETE FROM notification_channel; DELETE FROM task; DELETE FROM interest;');
 
     const interest = db
       .prepare('INSERT INTO interest (user_id, name, tags, query_keywords, description) VALUES (1, ?, ?, ?, ?)')
@@ -20,8 +20,8 @@ describe.skipIf(!process.env.AI_API_KEY)('runAgentCheck integration (real model)
     seedTaskId = Number(task.lastInsertRowid);
 
     db.prepare(
-      "UPDATE settings SET search_api_key = ?, ai_api_key = ?, ai_model = 'deepseek-chat', agent_max_steps = 8, agent_trace_enabled = 1 WHERE user_id = 1",
-    ).run(process.env.TAVILY_API_KEY, process.env.AI_API_KEY);
+      "UPDATE settings SET search_api_key = ?, ai_api_key = ?, ai_model = 'deepseek-chat', extra = ? WHERE user_id = 1",
+    ).run(process.env.TAVILY_API_KEY, process.env.AI_API_KEY, JSON.stringify({ agent_trace_enabled: true }));
 
     db.prepare(
       `INSERT INTO notification_channel (user_id, type, name, config, enabled, is_default)
@@ -45,17 +45,12 @@ describe.skipIf(!process.env.AI_API_KEY)('runAgentCheck integration (real model)
     if (run.error_type) console.log('error_type:', run.error_type);
     if (run.error_message) console.log('error_message:', run.error_message);
 
-    const updates = db.prepare('SELECT * FROM "update" WHERE interest_id = ?').all(seedInterestId) as any[];
-    console.log('=== Updates ===');
-    console.log('count:', updates.length);
-    for (const u of updates) {
-      console.log(`  [${u.importance}/10] ${u.title}`);
+    const sources = db.prepare('SELECT * FROM source WHERE interest_id = ?').all(seedInterestId) as any[];
+    console.log('=== Sources ===');
+    console.log('count:', sources.length);
+    for (const s of sources) {
+      console.log(`  ${s.title}`);
     }
-
-    const state = db.prepare('SELECT * FROM interest_state WHERE interest_id = ?').get(seedInterestId) as any;
-    console.log('=== State ===');
-    console.log('summary:', state?.summary);
-    console.log('key_points:', state?.key_points);
 
     expect(result.runId).toBeDefined();
     expect(run.status).toBe('success');

@@ -1,6 +1,8 @@
 import { createHmac } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { Errors } from '../lib/errors.js';
+import { nowUtc } from '../lib/time.js';
+import { notifyLogService } from '../services/notify-log.service.js';
 
 export interface FeishuConfig {
   webhook_url?: string;
@@ -23,6 +25,16 @@ export interface NotifyOptions {
   fetchImpl?: typeof fetch;
   timestamp?: string;
   mailer?: Mailer;
+  /** 通知上下文元数据，用于写入 notify_log 追溯 */
+  meta?: NotifyMeta;
+}
+
+/** 通知上下文，随 notify 调用传入，落 notify_log 便于追溯 */
+export interface NotifyMeta {
+  userId?: number;
+  interestId?: number;
+  eventId?: number;
+  title?: string;
 }
 
 const EMAIL_SUBJECT = '🔔 Nudge 兴趣动态提醒';
@@ -69,6 +81,8 @@ export async function sendFeishu(
 export interface NotifyChannel {
   type: string;
   config: string;
+  /** 渠道 id（来自 notification_channel 行），可选，用于 notify_log 关联 */
+  id?: number;
 }
 
 function createMailer(config: EmailConfig): Mailer {
@@ -110,14 +124,41 @@ export async function notify(
   text: string,
   opts: NotifyOptions = {},
 ): Promise<void> {
-  if (channel.type === 'feishu') {
-    const config = JSON.parse(channel.config) as FeishuConfig;
-    return sendFeishu(config, text, opts);
+  const channelId = typeof channel.id === 'number' ? channel.id : null;
+  const meta = opts.meta;
+  let error: Error | null = null;
+
+  try {
+    if (channel.type === 'feishu') {
+      const config = JSON.parse(channel.config) as FeishuConfig;
+      await sendFeishu(config, text, opts);
+    } else if (channel.type === 'email') {
+      const config = JSON.parse(channel.config) as EmailConfig;
+      await sendEmail(config, text, opts);
+    } else {
+      // dingtalk 已在 zod + init.sql CHECK 层禁用，此处仅作兜底
+      throw Errors.validation(`不支持的渠道类型: ${channel.type}`);
+    }
+  } catch (e) {
+    error = e instanceof Error ? e : new Error(typeof e === 'string' ? e : JSON.stringify(e));
   }
-  if (channel.type === 'email') {
-    const config = JSON.parse(channel.config) as EmailConfig;
-    return sendEmail(config, text, opts);
+
+  // 无论成败都写通知日志（尽力而为，日志写入失败不掩盖通知结果）
+  try {
+    notifyLogService.insert({
+      userId: meta?.userId ?? 1,
+      channelId,
+      interestId: meta?.interestId ?? null,
+      eventId: meta?.eventId ?? null,
+      title: meta?.title ?? null,
+      content: text,
+      status: error ? 'failed' : 'success',
+      errorMessage: error ? error.message : null,
+      sentAt: nowUtc(),
+    });
+  } catch {
+    // 日志写入失败不应影响通知主流程
   }
-  // TODO: dingtalk —— 暂时停用
-  throw Errors.validation(`不支持的渠道类型: ${channel.type}`);
+
+  if (error) throw error;
 }

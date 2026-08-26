@@ -24,66 +24,51 @@ beforeEach(() => {
 });
 
 describe('taskRunService', () => {
-  it('succeed records the number of updates saved for this run', () => {
+  it('succeed records the number of sources saved for this run', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
 
     taskRunService.succeed(1, runId, {
       searchResultCount: 5,
-      updatesCreated: 3,
+      sourcesCreated: 3,
     });
 
-    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
-    expect(row.updates_created_count).toBe(3);
+    const row = db.prepare('SELECT sources_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.sources_created_count).toBe(3);
   });
 
-  it('succeed leaves updates_created_count NULL when not provided', () => {
+  it('succeed leaves sources_created_count NULL when not provided', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
 
     taskRunService.succeed(1, runId);
 
-    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
-    expect(row.updates_created_count).toBeNull();
+    const row = db.prepare('SELECT sources_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.sources_created_count).toBeNull();
   });
 
-  it('partial records the number of updates saved for this run', () => {
-    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
-
-    taskRunService.partial(
-      1,
-      runId,
-      'notify_failed',
-      new Error('飞书发送失败: 19021'),
-      { inputTokens: 100, outputTokens: 50 },
-      2,
-    );
-
-    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
-    expect(row.updates_created_count).toBe(2);
-  });
-
-  it('fail leaves updates_created_count NULL', () => {
+  it('fail leaves sources_created_count NULL', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
 
     taskRunService.fail(1, runId, 'search_failed', new Error('Tavily HTTP 500'));
 
-    const row = db.prepare('SELECT updates_created_count FROM task_run WHERE id = ?').get(runId) as any;
-    expect(row.updates_created_count).toBeNull();
+    const row = db.prepare('SELECT sources_created_count FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.sources_created_count).toBeNull();
   });
 
-  it('list returns the saved update count for each run', () => {
+  it('list returns the saved sources count for each run', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
-    taskRunService.succeed(1, runId, { updatesCreated: 4 });
+    taskRunService.succeed(1, runId, { sourcesCreated: 4 });
 
     const rows = taskRunService.list(1, { limit: 10 });
-    expect(rows[0].updates_created_count).toBe(4);
+    expect(rows[0].sources_created_count).toBe(4);
   });
 
-  it('start creates a running task_run and returns its id', () => {
-    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+  it('start creates a running task_run with run_mode and returns its id', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId, 'agent');
 
     const row = db.prepare('SELECT * FROM task_run WHERE id = ?').get(runId) as any;
     expect(row).not.toBeUndefined();
     expect(row.status).toBe('running');
+    expect(row.run_mode).toBe('agent');
     expect(row.user_id).toBe(1);
     expect(row.started_at).toBeTruthy();
   });
@@ -92,13 +77,11 @@ describe('taskRunService', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
 
     taskRunService.succeed(1, runId, {
-      searchQuery: '华友钴业 股价 最新',
       searchResultCount: 5,
     });
 
     const row = db.prepare('SELECT * FROM task_run WHERE id = ?').get(runId) as any;
     expect(row.status).toBe('success');
-    expect(row.search_query).toBe('华友钴业 股价 最新');
     expect(row.search_result_count).toBe(5);
     expect(row.finished_at).toBeTruthy();
     expect(row.duration_ms).toBeGreaterThanOrEqual(0);
@@ -116,16 +99,6 @@ describe('taskRunService', () => {
     expect(row.finished_at).toBeTruthy();
   });
 
-  it('marks notify failures as partial status', () => {
-    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
-
-    taskRunService.partial(1, runId, 'notify_failed', new Error('飞书发送失败: 19021'));
-
-    const row = db.prepare('SELECT * FROM task_run WHERE id = ?').get(runId) as any;
-    expect(row.status).toBe('partial');
-    expect(row.error_type).toBe('notify_failed');
-  });
-
   it('succeed records llm usage tokens', () => {
     const runId = taskRunService.start(1, seedTaskId, seedInterestId);
 
@@ -138,23 +111,6 @@ describe('taskRunService', () => {
     const row = db.prepare('SELECT * FROM task_run WHERE id = ?').get(runId) as any;
     expect(row.llm_input_tokens).toBe(1234);
     expect(row.llm_output_tokens).toBe(567);
-  });
-
-  it('partial records llm usage tokens', () => {
-    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
-
-    taskRunService.partial(
-      1,
-      runId,
-      'notify_failed',
-      new Error('飞书发送失败: 19021'),
-      { inputTokens: 100, outputTokens: 50 },
-    );
-
-    const row = db.prepare('SELECT * FROM task_run WHERE id = ?').get(runId) as any;
-    expect(row.status).toBe('partial');
-    expect(row.llm_input_tokens).toBe(100);
-    expect(row.llm_output_tokens).toBe(50);
   });
 
   it('succeed stores duration in real milliseconds', () => {

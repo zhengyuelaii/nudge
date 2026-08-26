@@ -35,10 +35,8 @@ function addColumn(database: DatabaseType, table: string, column: string, defini
 }
 
 function runMigrations(database: DatabaseType): void {
-  // interest_state: 跨轮结构化状态（程序维护）新增列
-  addColumn(database, 'interest_state', 'last_query', 'TEXT');
-  addColumn(database, 'interest_state', 'last_result_count', 'INTEGER');
-  addColumn(database, 'interest_state', 'last_change_at', 'TEXT');
+  // interest_state 已废弃：历史状态改由 interest_event/source 派生，老库幂等清理
+  database.exec('DROP TABLE IF EXISTS interest_state');
 }
 
 runMigrations(db);

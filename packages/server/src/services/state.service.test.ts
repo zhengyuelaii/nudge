@@ -4,109 +4,79 @@ import { stateService } from './state.service.js';
 
 let seedInterestId = 0;
 
-function seed(): void {
+function seedInterest(): void {
   const interest = db
     .prepare('INSERT INTO interest (user_id, name, tags) VALUES (1, ?, ?)')
-    .run('华友钴业', '["company"]');
+    .run('黄金价格', '["commodity"]');
   seedInterestId = Number(interest.lastInsertRowid);
 }
 
 beforeEach(() => {
-  db.exec('DELETE FROM interest_state; DELETE FROM interest;');
-  seed();
+  db.exec('DELETE FROM source; DELETE FROM interest_event; DELETE FROM interest;');
+  seedInterest();
 });
 
 describe('stateService', () => {
-  it('returns null when no state exists', () => {
+  it('returns null when there is no event history', () => {
     const state = stateService.get(1, seedInterestId);
     expect(state).toBeNull();
   });
 
-  it('creates state via upsert', () => {
-    stateService.upsert(1, seedInterestId, {
-      summary: '黄金价格稳定',
-      key_points: ['价格在 2000 美元/盎司'],
-      query_hints_next: ['关注美联储政策'],
-      has_new_progress: true,
-      last_checked_at: '2026-01-01 00:00:00',
-    });
+  it('returns state derived from the most recent event summary', () => {
+    const event = db
+      .prepare(
+        "INSERT INTO interest_event (user_id, interest_id, title, summary, run_at) VALUES (1, ?, ?, ?, '2026-08-20 09:00:00')",
+      )
+      .run(seedInterestId, '黄金价格突破 2000 美元', '现货黄金盘中首次站上 2000 美元大关');
+    const eventId = Number(event.lastInsertRowid);
+
+    db.prepare(
+      'INSERT INTO source (user_id, interest_id, event_id, title) VALUES (1, ?, ?, ?)',
+    ).run(seedInterestId, eventId, '现货黄金创历史新高');
 
     const state = stateService.get(1, seedInterestId);
     expect(state).not.toBeNull();
-    expect(state!.summary).toBe('黄金价格稳定');
-    expect(state!.key_points).toEqual(['价格在 2000 美元/盎司']);
-    expect(state!.query_hints).toEqual(['关注美联储政策']);
-    expect(state!.last_checked_at).toBe('2026-01-01 00:00:00');
-    expect(state!.no_change_streak).toBe(0);
+    expect(state!.summary).toBe('现货黄金盘中首次站上 2000 美元大关');
+    expect(state!.key_points).toContain('现货黄金创历史新高');
+    expect(state!.last_checked_at).toBe('2026-08-20 09:00:00');
   });
 
-  it('updates existing state via upsert', () => {
-    stateService.upsert(1, seedInterestId, {
-      summary: '初始状态',
-      key_points: [],
-      query_hints_next: [],
-      has_new_progress: false,
-      last_checked_at: '2026-01-01 00:00:00',
-    });
-
-    stateService.upsert(1, seedInterestId, {
-      summary: '更新后状态',
-      key_points: ['新发现'],
-      query_hints_next: ['下次关注'],
-      has_new_progress: true,
-      last_checked_at: '2026-01-02 00:00:00',
-    });
+  it('falls back to event title when the event has no summary', () => {
+    db.prepare(
+      "INSERT INTO interest_event (user_id, interest_id, title, run_at) VALUES (1, ?, '黄金价格突破 2000 美元', '2026-08-20 09:00:00')",
+    ).run(seedInterestId);
 
     const state = stateService.get(1, seedInterestId);
-    expect(state!.summary).toBe('更新后状态');
-    expect(state!.key_points).toEqual(['新发现']);
-    expect(state!.no_change_streak).toBe(0);
+    expect(state!.summary).toBe('黄金价格突破 2000 美元');
   });
 
-  it('increments no_change_streak when no progress', () => {
-    stateService.upsert(1, seedInterestId, {
-      summary: '状态1',
-      key_points: [],
-      query_hints_next: [],
-      has_new_progress: false,
-      last_checked_at: '2026-01-01 00:00:00',
-    });
-
-    stateService.upsert(1, seedInterestId, {
-      summary: '状态2',
-      key_points: [],
-      query_hints_next: [],
-      has_new_progress: false,
-      last_checked_at: '2026-01-02 00:00:00',
-    });
+  it('prefers the newest event when multiple exist', () => {
+    db.prepare(
+      "INSERT INTO interest_event (user_id, interest_id, title, run_at) VALUES (1, ?, '旧事件', '2026-08-10 09:00:00')",
+    ).run(seedInterestId);
+    db.prepare(
+      "INSERT INTO interest_event (user_id, interest_id, title, run_at) VALUES (1, ?, '新事件', '2026-08-20 09:00:00')",
+    ).run(seedInterestId);
 
     const state = stateService.get(1, seedInterestId);
-    expect(state!.no_change_streak).toBe(2);
+    expect(state!.summary).toBe('新事件');
   });
 
-  it('resets no_change_streak when progress', () => {
-    stateService.upsert(1, seedInterestId, {
-      summary: '状态1',
-      key_points: [],
-      query_hints_next: [],
-      has_new_progress: false,
-      last_checked_at: '2026-01-01 00:00:00',
-    });
+  it('upsert is a no-op (history lives in events)', () => {
+    expect(() =>
+      stateService.upsert(1, seedInterestId, {
+        summary: 'x',
+        key_points: ['k'],
+        query_hints_next: ['q'],
+        has_new_progress: true,
+        last_checked_at: '2026-08-20 09:00:00',
+      }),
+    ).not.toThrow();
 
-    stateService.upsert(1, seedInterestId, {
-      summary: '状态2',
-      key_points: [],
-      query_hints_next: [],
-      has_new_progress: true,
-      last_checked_at: '2026-01-02 00:00:00',
-    });
-
-    const state = stateService.get(1, seedInterestId);
-    expect(state!.no_change_streak).toBe(0);
+    expect(stateService.get(1, seedInterestId)).toBeNull();
   });
 
-  it('returns null for non-existent interest', () => {
-    const state = stateService.get(1, 99999);
-    expect(state).toBeNull();
+  it('returns null for a non-existent interest', () => {
+    expect(stateService.get(1, 99999)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { tool, type Tool } from 'ai';
 import { z } from 'zod';
 import { search } from '../ai/search.js';
-import { updateService } from '../services/update.service.js';
+import { sourceService } from '../services/source.service.js';
 import { stateService } from '../services/state.service.js';
 import { interestService } from '../services/interest.service.js';
 import { notify } from '../notify/index.js';
@@ -11,25 +11,22 @@ import type { Trace } from './trace.js';
 export interface ToolContext {
   userId: number;
   interest: { id: number; name: string; tags: string[]; query_keywords?: string | null; description?: string | null };
-  settings: {
-    search_api_key?: string | null;
-    notify_threshold: number;
-    notify_guard: number;
-  };
+  settings: Record<string, unknown> & { ai_api_key?: string | null; ai_base_url?: string | null; ai_model?: string | null; search_api_key?: string | null; search_provider?: string | null };
   runId: number;
   trace: Trace;
+  runStats?: { notifiedCount: number };
   fetchImpl?: typeof fetch;
   mailer?: { sendMail: (mail: { from: string; to: string; subject: string; text: string }) => Promise<unknown> };
 }
 
-function buildNotifyText(interest: { name: string }, updates: Array<{ title: string; importance: number; source_url?: string | null }>): string {
-  const lines = updates.map(
-    (u) =>
-      `【${u.importance}/10】${u.title}${
-        u.source_url ? `\n${u.source_url}` : ''
+function buildNotifyText(interest: { name: string }, sources: Array<{ title: string; source_url?: string | null }>): string {
+  const lines = sources.map(
+    (s) =>
+      `${s.title}${
+        s.source_url ? `\n${s.source_url}` : ''
       }`,
   );
-  return `🔔「${interest.name}」有 ${updates.length} 条重要变化\n\n${lines.join('\n\n')}`;
+  return `🔔「${interest.name}」有 ${sources.length} 条重要变化\n\n${lines.join('\n\n')}`;
 }
 
 export function buildTools(ctx: ToolContext): Record<string, Tool> {
@@ -54,22 +51,23 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
       },
     }),
 
-    get_recent_updates: tool({
-      description: '回顾该兴趣最近保存的动态，判断本轮发现是否构成新进展。',
+    get_recent_sources: tool({
+      description: '回顾该兴趣最近保存的来源，判断本轮发现是否构成新进展。',
       inputSchema: z.object({
         limit: z.number().int().min(1).max(30).optional(),
       }),
       execute: (input: { limit?: number }) => {
-        const rows = updateService.list(ctx.userId, {
+        const rows = sourceService.list(ctx.userId, {
           interestId: ctx.interest.id,
           limit: input.limit ?? 10,
         });
-        return rows.map((u) => ({
-          title: u.title,
-          summary: u.summary,
-          importance: u.importance,
-          has_progress: !!u.has_progress,
-          published_at: u.published_at,
+        return rows.map((s) => ({
+          title: s.title,
+          summary: s.summary,
+          source_url: s.source_url,
+          source_name: s.source_name,
+          published_at: s.published_at,
+          created_at: s.created_at,
         }));
       },
     }),
@@ -88,7 +86,7 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
       },
     }),
 
-    save_update: tool({
+    save_source: tool({
       description: '保存一条本轮发现的重要变化。source_url 必须来自 web_search 结果。',
       inputSchema: z.object({
         title: z.string(),
@@ -96,13 +94,25 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
         source_url: z.string().url(),
         source_name: z.string().optional(),
         published_at: z.string().optional(),
-        importance: z.number().int().min(1).max(10),
-        has_progress: z.boolean().optional(),
       }),
-      execute: (input: { title: string; summary?: string; source_url: string; source_name?: string; published_at?: string; importance: number; has_progress?: boolean }) => {
-        const [row] = updateService.writeMany(ctx.userId, ctx.interest.id, ctx.runId, [input]);
-        const summary = row ? `保存1条新动态: ${row.title}` : '重复内容，已跳过';
-        ctx.trace.push({ kind: 'tool_result', tool: 'save_update', summary, at: nowUtc() });
+      execute: async (input: { title: string; summary?: string; source_url: string; source_name?: string; published_at?: string }) => {
+        const state = stateService.get(ctx.userId, ctx.interest.id);
+        const eventTitle = input.title.slice(0, 100);
+
+        const { eventService } = await import('../services/event.service.js');
+        const event = eventService.create(ctx.userId, {
+          interestId: ctx.interest.id,
+          taskRunId: ctx.runId,
+          title: eventTitle,
+          runAt: nowUtc(),
+          summary: state?.summary ?? null,
+        });
+
+        const [row] = sourceService.createMany(ctx.userId, ctx.interest.id, event.id, [input]);
+        eventService.updateSourceCount(ctx.userId, event.id, 1);
+
+        const summary = row ? `保存1条新来源: ${row.title}` : '重复内容，已跳过';
+        ctx.trace.push({ kind: 'tool_result', tool: 'save_source', summary, at: nowUtc() });
         return row ? { saved: true, id: row.id } : { saved: false, duplicate: true };
       },
     }),
@@ -128,60 +138,50 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
     notify_user: tool({
       description: '当你判断本轮有值得用户立即知晓的重要变化时调用。无重要变化不要调用。',
       inputSchema: z.object({
-        message: z.string().optional().describe('通知正文，省略则系统按本轮保存的动态组装'),
-        update_ids: z.array(z.number()).optional().describe('指定通知哪些 update，省略取本轮 importance≥阈值'),
+        message: z.string().optional().describe('通知正文，省略则系统按本轮保存的来源组装'),
       }),
-      execute: async (input: { message?: string; update_ids?: number[] }) => {
-        const runStartedAt = nowUtc();
+      execute: async (input: { message?: string }) => {
+        const recentSources = sourceService.list(ctx.userId, {
+          interestId: ctx.interest.id,
+        });
 
-        if (ctx.settings.notify_guard) {
-          const hit = updateService.list(ctx.userId, {
-            interestId: ctx.interest.id,
-            since: runStartedAt,
-            importance: ctx.settings.notify_threshold,
-          });
-          if (hit.length === 0) {
-            ctx.trace.push({ kind: 'tool_result', tool: 'notify_user', summary: '本轮无 importance≥阈值 的动态，拒绝通知', at: nowUtc() });
-            return { notified: 0, reason: '本轮无 importance≥阈值 的动态，拒绝通知' };
-          }
+        const sourcesToNotify = recentSources.slice(0, 10);
+
+        if (sourcesToNotify.length === 0) {
+          ctx.trace.push({ kind: 'tool_result', tool: 'notify_user', summary: '本轮无来源，拒绝通知', at: nowUtc() });
+          return { notified: 0, reason: '本轮无来源，拒绝通知' };
         }
 
         const channels = interestService.getNotifyChannels(ctx.userId, ctx.interest.id);
 
-        let updates: Array<{ id: number; title: string; importance: number; source_url: string | null }>;
-        if (input.update_ids && input.update_ids.length > 0) {
-          updates = input.update_ids.map((id) => {
-            const row = updateService.get(ctx.userId, id);
-            return { id: row.id, title: row.title, importance: row.importance, source_url: row.source_url };
-          });
-        } else {
-          const recent = updateService.listByRun(ctx.userId, ctx.runId, {
-            importance: ctx.settings.notify_threshold,
-          });
-          updates = recent.map((u) => ({ id: u.id, title: u.title, importance: u.importance, source_url: u.source_url }));
-        }
-
-        const text: string = input.message ?? buildNotifyText(ctx.interest, updates);
+        const text: string = input.message ?? buildNotifyText(ctx.interest, sourcesToNotify);
 
         let notifiedCount = 0;
         const notifyErrors: string[] = [];
         for (const ch of channels) {
           try {
-            await notify(ch, text, { fetchImpl: ctx.fetchImpl, mailer: ctx.mailer });
+            await notify(ch, text, {
+              fetchImpl: ctx.fetchImpl,
+              mailer: ctx.mailer,
+              meta: {
+                userId: ctx.userId,
+                interestId: ctx.interest.id,
+                eventId: sourcesToNotify[0]?.event_id,
+                title: ctx.interest.name,
+              },
+            });
             notifiedCount++;
           } catch {
             notifyErrors.push(ch.name);
           }
         }
 
-        if (notifiedCount > 0) {
-          updateService.markNotified(ctx.userId, updates.map((u) => u.id));
-        }
-
         const summary = notifiedCount > 0
           ? `已通知${notifiedCount}渠道`
           : `通知失败: ${notifyErrors.join(', ')}`;
         ctx.trace.push({ kind: 'tool_result', tool: 'notify_user', summary, at: nowUtc() });
+
+        if (ctx.runStats) ctx.runStats.notifiedCount += notifiedCount;
 
         return { notified: notifiedCount, channels: channels.map((c) => c.name) };
       },

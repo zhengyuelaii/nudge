@@ -38,43 +38,51 @@ const settings = {
 };
 
 describe('analyze', () => {
-  it('returns structured updates from the LLM output', async () => {
+  it('returns a single consolidated result from the LLM output', async () => {
     const model = mockModelWithJson({
-      elements: [
+      has_progress: true,
+      title: '华友钴业第三季度净利润同比增长 45%',
+      summary: '公司发布三季度财报，净利润同比增长 45%',
+      source: [
         {
-          title: '华友钴业第三季度净利润同比增长 45%',
-          summary: '公司发布三季度财报，净利润同比增长 45%',
+          title: '华友钴业发布三季度财报',
           source_url: 'https://example.com/news/1',
           source_name: '东方财富网',
           published_at: '2026-08-18T09:00:00.000Z',
           importance: 8,
-          has_progress: true,
         },
       ],
     });
 
-    const { updates, usage } = await analyze(interest, results, settings, { model });
+    const result = await analyze(interest, results, settings, { model });
 
-    expect(updates).toEqual([
+    expect(result.has_progress).toBe(true);
+    expect(result.title).toBe('华友钴业第三季度净利润同比增长 45%');
+    expect(result.summary).toBe('公司发布三季度财报，净利润同比增长 45%');
+    expect(result.source).toEqual([
       {
-        title: '华友钴业第三季度净利润同比增长 45%',
-        summary: '公司发布三季度财报，净利润同比增长 45%',
+        title: '华友钴业发布三季度财报',
         source_url: 'https://example.com/news/1',
         source_name: '东方财富网',
         published_at: '2026-08-18T09:00:00.000Z',
         importance: 8,
-        has_progress: true,
       },
     ]);
-    expect(usage).toEqual({ inputTokens: 10, outputTokens: 20 });
+    expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
   });
 
-  it('returns an empty array when the LLM finds no relevant changes', async () => {
-    const model = mockModelWithJson({ elements: [] });
+  it('reports no progress when the LLM finds no relevant changes', async () => {
+    const model = mockModelWithJson({
+      has_progress: false,
+      title: '',
+      summary: '',
+      source: [],
+    });
 
-    const { updates } = await analyze(interest, results, settings, { model });
+    const result = await analyze(interest, results, settings, { model });
 
-    expect(updates).toEqual([]);
+    expect(result.has_progress).toBe(false);
+    expect(result.source).toEqual([]);
   });
 
   it('throws when no AI API key is configured', async () => {
@@ -85,33 +93,43 @@ describe('analyze', () => {
 
   it('tolerates minimal model output and fills defaults', async () => {
     const model = mockModelWithJson({
-      elements: [
+      has_progress: true,
+      title: '华友钴业上半年净利创新高',
+      summary: '上半年营收 555.68 亿元，同比增长 49.39%',
+      source: [
         {
           title: '华友钴业上半年净利创新高',
-          description: '上半年营收 555.68 亿元，同比增长 49.39%',
         },
       ],
     });
 
-    const { updates } = await analyze(interest, results, settings, { model });
+    const result = await analyze(interest, results, settings, { model });
 
-    expect(updates).toEqual([
+    expect(result.has_progress).toBe(true);
+    expect(result.source).toEqual([
       {
         title: '华友钴业上半年净利创新高',
-        summary: '上半年营收 555.68 亿元，同比增长 49.39%',
         source_url: '',
         source_name: '',
         published_at: '',
         importance: 5,
-        has_progress: false,
       },
     ]);
+  });
+
+  it('returns no progress when the model output is invalid', async () => {
+    const model = mockModelWithJson({ elements: [] });
+
+    const result = await analyze(interest, results, settings, { model });
+
+    expect(result.has_progress).toBe(false);
+    expect(result.source).toEqual([]);
   });
 
   it('defaults usage to zero when the model reports no tokens', async () => {
     const model = new MockLanguageModelV4({
       doGenerate: async () => ({
-        content: [{ type: 'text', text: JSON.stringify({ elements: [] }) }],
+        content: [{ type: 'text', text: JSON.stringify({ has_progress: false, title: '', summary: '', source: [] }) }],
         finishReason: { unified: 'stop', raw: undefined },
         usage: {
           inputTokens: { total: 0, noCache: 0, cacheRead: undefined, cacheWrite: undefined },
@@ -137,7 +155,7 @@ describe('analyze', () => {
           .flatMap((m) => m.content.map((c) => c.text))
           .join('\n');
         return {
-          content: [{ type: 'text', text: JSON.stringify({ elements: [] }) }],
+          content: [{ type: 'text', text: JSON.stringify({ has_progress: false, title: '', summary: '', source: [] }) }],
           finishReason: { unified: 'stop', raw: undefined },
           usage: {
             inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },

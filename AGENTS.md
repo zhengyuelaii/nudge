@@ -28,7 +28,7 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 ## Server 布局
 
-`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = search → LLM 分析 → 写 updates → notify → 记 task_run）、`ai/` search+llm、`notify/` 飞书+邮件、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/updates` `/task-runs`。
+`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = search → LLM 分析 → 写 event+source → notify → 记 task_run）、`ai/` search+llm、`agent/` Agent Loop、`notify/` 飞书+邮件、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/events` `/sources` `/task-runs`。
 
 ## SQLite / 迁移
 
@@ -46,6 +46,12 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 - 业务密钥（AI key、Tavily key、飞书 webhook、SMTP 密码）存 **SQLite**（`settings`、`notification_channel.config` JSON），经设置页配置 —— 绝不硬编码。仅测试凭据放 `packages/server/.env`（git-ignore）；测试经 `vitest.setup.ts`（`process.loadEnvFile()`，文件缺失静默 → 占位回退）。
 - DingTalk 故意禁用：zod `createChannelSchema` 只允许 `['feishu','email']`；其设置 UI 已注释。
 - 推 GitHub 无本地代理会卡：`export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897`。
+
+## Agent（暂停优化）
+
+- **Agent Loop（`packages/server/src/agent/`）暂停优化**：当前不再主动改进/重构 agent 相关代码。
+- 只有**不影响项目**的改动才允许触碰 `agent/` 下文件，例如：为适配表结构/字段变更做的必要同步（列名、设置项、工具名），或修复阻塞运行/测试的 bug。
+- 不要做功能增强、prompt 调优、新增工具、行为改进等优化类改动，除非用户明确要求。
 
 ## 测试约定
 

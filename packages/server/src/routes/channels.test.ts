@@ -80,10 +80,12 @@ describe('POST /api/notification-channels/:id/test', () => {
   });
 
   it('rejects unsupported channel types honestly', async () => {
-    const dingtalkId = seedChannel('dingtalk', { webhook_url: 'x', secret: '' });
-    const res = await app.request(`/api/notification-channels/${dingtalkId}/test`, { method: 'POST' });
+    // dingtalk 已在 zod + init.sql CHECK 层禁用（P2-15），创建时即被拒绝
+    const res = await app.request('/api/notification-channels', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'dingtalk', name: 'dt', config: { webhook_url: 'x' } }),
+      headers: { 'Content-Type': 'application/json' },
+    });
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.message).toContain('不支持');
   });
 });
