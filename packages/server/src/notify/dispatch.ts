@@ -1,10 +1,12 @@
 import { interestService } from '../services/interest.service.js';
 import { notify, type Mailer } from './index.js';
 
-/** 通知正文里的来源条目（只需要标题与链接） */
+/** 通知正文里的来源条目 */
 export interface NotifySource {
   title: string;
   sourceUrl?: string | null;
+  /** 为什么构成变化（命中触发条件的哪一点）：让用户看懂凭什么打扰他 */
+  why?: string | null;
 }
 
 export interface NotifyEventInput {
@@ -33,9 +35,12 @@ export interface NotifyEventResult {
   failures: NotifyEventFailure[];
 }
 
-/** 通知正文：🔔「兴趣名」有 N 条重要变化 + 标题/链接列表 */
+/** 通知正文：🔔「兴趣名」有 N 条重要变化 + 标题（含判定理由）/链接列表 */
 export function buildNotifyText(interestName: string, sources: NotifySource[]): string {
-  const lines = sources.map((s) => (s.sourceUrl ? `${s.title}\n${s.sourceUrl}` : s.title));
+  const lines = sources.map((s) => {
+    const head = s.why ? `${s.title}\n（为什么重要：${s.why}）` : s.title;
+    return s.sourceUrl ? `${head}\n${s.sourceUrl}` : head;
+  });
   return `🔔「${interestName}」有 ${sources.length} 条重要变化\n\n${lines.join('\n\n')}`;
 }
 

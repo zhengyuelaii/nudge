@@ -21,9 +21,6 @@ export interface CheckOptions {
   mailer?: Mailer;
 }
 
-// 低于该重要度的变化不建事件、不通知（1-3 无关 / 4-6 一般 / 7-8 重要 / 9-10 重大）
-const MIN_IMPORTANCE = 5;
-
 type AnalyzeOutcome = Awaited<ReturnType<typeof analyze>>;
 
 function buildKnownState(events: Awaited<ReturnType<typeof eventService.listRecent>>): string {
@@ -116,10 +113,9 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
     return { runId, searchResultCount: 0, createdCount: 0, notifiedCount: 0 };
   }
 
-  // ── 过滤：has_progress=false 视为相对历史无实质进展，来源再做重要度兜底 ──
-  const llmSources = analyzed.has_progress
-    ? analyzed.source.filter((s) => s.importance >= MIN_IMPORTANCE)
-    : [];
+  // ── 过滤：has_progress=false 视为相对历史无实质进展，来源即被丢弃 ──
+  // 「什么算变化」由模型判定；程序层不再用重要度打分做二次筛选
+  const llmSources = analyzed.has_progress ? analyzed.source : [];
 
   if (llmSources.length === 0) {
     succeedRun(userId, runId, analyzed, 0);
@@ -150,7 +146,13 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
       userId,
       interest,
       event,
-      sources: createdSources.map((s) => ({ title: s.title, sourceUrl: s.source_url })),
+      // why 不落库（source 表无该列），按同序下标从模型输出取回；
+      // createMany 逐条顺序插入，返回值与入参同序。
+      sources: createdSources.map((s, i) => ({
+        title: s.title,
+        sourceUrl: s.source_url,
+        why: llmSources[i]?.why,
+      })),
     },
     { fetchImpl: opts.fetchImpl, mailer: opts.mailer },
   );

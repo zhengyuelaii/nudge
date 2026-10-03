@@ -28,6 +28,8 @@ interface Interest {
   tags: string[];
   description: string | null;
   query_keywords: string | null;
+  subject: string;
+  criteria: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -62,6 +64,8 @@ const form = ref({
   time: '09:00',
   description: '',
   queryKeywords: '',
+  subject: '',
+  criteria: '',
   channelIds: [] as number[],
 });
 
@@ -100,7 +104,7 @@ async function loadChannels() {
 }
 
 function openAdd() {
-  form.value = { name: '', tags: [], frequency: 'day', time: '09:00', description: '', queryKeywords: '', channelIds: [] };
+  form.value = { name: '', tags: [], frequency: 'day', time: '09:00', description: '', queryKeywords: '', subject: '', criteria: '', channelIds: [] };
   submitAttempted.value = false;
   showModal.value = true;
   void loadCategories();
@@ -119,6 +123,8 @@ async function save() {
       time: form.value.time,
       description: form.value.description || undefined,
       queryKeywords: form.value.queryKeywords || undefined,
+      subject: form.value.subject || undefined,
+      criteria: form.value.criteria || undefined,
       channelIds: form.value.channelIds,
     });
     await loadInterests();
@@ -206,6 +212,21 @@ function formatSchedule(item: Interest) {
           <div class="space-y-2">
             <Label>搜索关键词（可选）</Label>
             <Input v-model="form.queryKeywords" placeholder="留空则使用名称" />
+          </div>
+          <div class="space-y-2">
+            <Label>监控主体（可选）</Label>
+            <Input v-model="form.subject" placeholder="如：美国生物安全法案 / 国际金价 / 华友钴业" />
+          </div>
+          <div class="space-y-2">
+            <Label>触发条件（可选）</Label>
+            <Textarea
+              v-model="form.criteria"
+              rows="2"
+              placeholder="一句话，看到单篇新闻就能判断是/否。例：出现修订、新增条款或进入投票环节"
+            />
+            <p class="text-xs text-gray-400">
+              填写后只推送命中该条件的变化。请写具体事件（如「新产能投产」「净利同比变动超 30%」），避免「关注动态」「有变化」这类任何新闻都算命中的描述。
+            </p>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">

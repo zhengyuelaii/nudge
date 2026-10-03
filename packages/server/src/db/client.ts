@@ -47,6 +47,10 @@ function runMigrations(database: DatabaseType): void {
 
   // task_run: 模型对本轮执行情况的总结（无进展时也能知道模型做了什么）
   addColumn(database, 'task_run', 'summary', 'TEXT');
+
+  // interest: 关注判据（主体 + 触发条件）。空串表示未配置 → 退化为无判据的旧行为
+  addColumn(database, 'interest', 'subject', "TEXT NOT NULL DEFAULT ''");
+  addColumn(database, 'interest', 'criteria', "TEXT NOT NULL DEFAULT ''");
 }
 
 runMigrations(db);

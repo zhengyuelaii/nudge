@@ -18,6 +18,7 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 ```
 
 - 根**无 `test` 脚本**。跑测：`pnpm --filter @nudge/server test`（vitest）。单文件：`pnpm --filter @nudge/server exec vitest run src/<path>.test.ts`。
+- **E2E（真调 Tavily + DeepSeek）**：`pnpm --filter @nudge/server test:e2e` —— 自己生成一个兴趣、跑完整一轮、对产物打分。飞书被拦截（不真发消息，但通知链路与 `notify_log` 照跑）。缺 `AI_API_KEY` / `TAVILY_API_KEY` 时整套自动跳过，CI 安全。
 - UI 文案中文；代码/测试可英文。
 
 ## 技术栈
@@ -29,7 +30,7 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 ## Server 布局
 
-`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = 调 `analyze` → 写 event+source → notify → 记 task_run）、`ai/` 分析链路（`llm.ts` 编排：内部先检索再调模型，另有 `model`/`prompt`/`types` 三个职责模块）、`search/` 搜索 provider、`agent/` Agent Loop、`notify/`（`index.ts` 单渠道发送 + `dispatch.ts` 事件级分发）、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/events` `/sources` `/task-runs`。
+`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = 调 `analyze` → 写 event+source → notify → 记 task_run）、`ai/` 分析链路（`llm.ts` 编排：内部先检索再调模型，另有 `model`/`prompt`/`types` 三个职责模块；prompt 会注入兴趣的 `subject`/`criteria` 关注判据，两者留空则退化为无判据的旧行为）、`search/` 搜索 provider、`e2e/`（核心业务流程端到端测试 + 评分器）、`agent/` Agent Loop、`notify/`（`index.ts` 单渠道发送 + `dispatch.ts` 事件级分发）、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/events` `/sources` `/task-runs`。
 
 ## SQLite / 迁移
 
@@ -60,4 +61,5 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 - 测试 colocated（`src/**/*.test.ts`），TDD 优先。所有 server 测试共享一个内存 DB；`beforeEach` 清各自涉及的表。
 - `notify()` 及 check/search 路径接受注入的 `fetchImpl` / `mailer` / `model` —— 优先 stub 这些而非 mock 模块。
+- **E2E（`src/e2e/`）例外：不打桩**。`core-flow.e2e.test.ts` 自建兴趣 → 真跑 `runCheck`（真检索 + 真模型），只用一个分流 `fetchImpl` 拦下飞书、并缓存本轮 Tavily 响应供评分比对。`scorer.ts` 出两类分：规则分（链路健康 / 证据可信 / 理由完整 / 推送可读，确定性可复现）与 LLM 评审分（噪音率 / 漏判率 / 理由质量，独立模型当评审员）。断言只卡硬底线：run success、来源必须可回溯、总分 ≥60。
 - 改动后先跑单文件 → 全套 + `pnpm lint` + `pnpm build`。

@@ -87,7 +87,6 @@ describe('analyze', () => {
           source_url: 'https://example.com/news/1',
           source_name: '东方财富网',
           published_at: '2026-08-18T09:00:00.000Z',
-          importance: 8,
         },
       ],
     });
@@ -103,7 +102,7 @@ describe('analyze', () => {
         source_url: 'https://example.com/news/1',
         source_name: '东方财富网',
         published_at: '2026-08-18T09:00:00.000Z',
-        importance: 8,
+        why: '',
       },
     ]);
     expect(result.usage).toEqual({ inputTokens: 10, outputTokens: 20 });
@@ -155,7 +154,7 @@ describe('analyze', () => {
         source_url: '',
         source_name: '',
         published_at: '',
-        importance: 5,
+        why: '',
       },
     ]);
   });
@@ -165,7 +164,7 @@ describe('analyze', () => {
       has_progress: true,
       title: '来源超量',
       summary: '模型返回了 10 条来源',
-      source: Array.from({ length: 10 }, (_, i) => ({ title: `来源${i + 1}`, importance: 8 })),
+      source: Array.from({ length: 10 }, (_, i) => ({ title: `来源${i + 1}` })),
     });
 
     const result = await analyze(interest, settings, { model, fetchImpl });
@@ -223,6 +222,60 @@ describe('analyze', () => {
     expect(promptText).toContain('目前已知状态');
     expect(promptText).toContain('上半年营收 555.68 亿元，同比增长 49.39%');
     expect(promptText).toContain('has_progress');
+  });
+
+  it('injects the watch criteria into the prompt when configured', async () => {
+    let promptText = '';
+    const model = mockModelCapturingPrompt((t) => {
+      promptText = t;
+    });
+
+    await analyze(
+      {
+        ...interest,
+        subject: '美国生物安全法案',
+        criteria: '出现修订、新增条款或进入投票环节',
+      },
+      settings,
+      { model, fetchImpl },
+    );
+
+    expect(promptText).toContain('监控主体：美国生物安全法案');
+    expect(promptText).toContain('触发条件：出现修订、新增条款或进入投票环节');
+    // 有判据时判定规则换成「当且仅当命中触发条件」
+    expect(promptText).toContain('当且仅当');
+  });
+
+  it('keeps the prompt free of the criteria block when none is configured', async () => {
+    let promptText = '';
+    const model = mockModelCapturingPrompt((t) => {
+      promptText = t;
+    });
+
+    await analyze(interest, settings, { model, fetchImpl });
+
+    expect(promptText).not.toContain('监控主体');
+    expect(promptText).not.toContain('判定标准');
+    expect(promptText).not.toContain('当且仅当');
+  });
+
+  it('carries the per-source reason through to the result', async () => {
+    const model = mockModelWithJson({
+      has_progress: true,
+      title: '华友钴业三季度净利创新高',
+      summary: '净利同比增长 45%',
+      source: [
+        {
+          title: '华友钴业发布三季度财报',
+          source_url: 'https://example.com/news/1',
+          why: '命中「净利同比变动超 30%」：Q3 净利同比增长 45%',
+        },
+      ],
+    });
+
+    const result = await analyze(interest, settings, { model, fetchImpl });
+
+    expect(result.source[0].why).toBe('命中「净利同比变动超 30%」：Q3 净利同比增长 45%');
   });
 
   it('gives the model the publish date and the current time instead of letting it invent one', async () => {

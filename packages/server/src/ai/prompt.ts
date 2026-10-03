@@ -22,6 +22,28 @@ export interface BuildPromptInput {
   now?: Date;
 }
 
+/**
+ * 关注判据块：只有配置了主体或触发条件的兴趣才输出。
+ * 两者都留空时整块不出现，prompt 与「无判据」的旧行为一致。
+ */
+function buildCriteriaBlock(interest: InterestBrief): string {
+  const subject = interest.subject?.trim() ?? '';
+  const criteria = interest.criteria?.trim() ?? '';
+  if (!subject && !criteria) return '';
+
+  const subjectLine = subject ? `- 监控主体：${subject}\n` : '';
+  return `本兴趣的判定标准（只有命中的信息才算变化）：
+${subjectLine}- 触发条件：${criteria || '未填写，请以监控主体的重要事实变化为准'}
+未命中上述条件的信息一律视为无关，不得放进 source。
+
+判定示例：
+- 命中触发条件所述的具体事件（发布 / 通过 / 投产 / 突破 / 处罚 等）→ 算
+- 只有观点、评论、背景回顾，没有新的事实 → 不算
+- 话题相关但未构成触发条件所述的变化 → 不算
+
+`;
+}
+
 export function buildAnalyzePrompt({
   interest,
   results,
@@ -29,6 +51,8 @@ export function buildAnalyzePrompt({
   now = new Date(),
 }: BuildPromptInput): string {
   const context = interest.description ? `背景说明：${interest.description}\n\n` : '';
+  const criteriaBlock = buildCriteriaBlock(interest);
+  const hasCriteria = criteriaBlock !== '';
   const knownStateBlock = knownState
     ? `目前已知状态（此前的更新记录，用于判断是否构成进展）：\n${knownState}\n\n`
     : '';
@@ -47,7 +71,7 @@ export function buildAnalyzePrompt({
 
 当前时间：${nowText}（UTC），判断信息新旧以此为准。
 
-${context}${knownStateBlock}每个搜索结果格式：
+${context}${criteriaBlock}${knownStateBlock}每个搜索结果格式：
 - title: 标题
 - url: 链接
 - published_date: 该信息原始发布时间，「未知」表示搜索结果未提供
@@ -57,12 +81,16 @@ ${context}${knownStateBlock}每个搜索结果格式：
 ${resultLines}
 
 输出规则：
-1. has_progress=true 表示相比目前已知状态有实质进展（新变化/新进展），false 表示只是已知信息的重复或无关内容
+1. ${
+    hasCriteria
+      ? 'has_progress=true 当且仅当 source 中至少有一条命中上方「判定标准」的触发条件；仅仅"话题相关"不算命中。'
+      : 'has_progress=true 表示相比目前已知状态有实质进展（新变化/新进展），false 表示只是已知信息的重复或无关内容'
+  }
 2. title 为本轮更新的事件标题；summary 为本轮执行情况的中文总结（1-3 句）：检索了什么、结论是什么，无论是否有进展都必须填写
-3. source 数组列出构成本轮进展的来源，最多 ${MAX_ANALYZED_SOURCES} 条；source 内 importance 为目标估值 1-10：重大(9-10)/重要(7-8)/一般(4-6)/无关(1-3)，无关来源不要放进 source
+3. source 数组列出构成本轮进展的来源，最多 ${MAX_ANALYZED_SOURCES} 条；每条都必须是「变化」本身，而不是对已知信息的复述；每条都要用 why 一句话说明它命中了触发条件的哪一点（未配置触发条件时说明为何值得关注）
 4. source_url 必须逐字复制上方搜索结果里的 url 字段（不要改写、补全或添加参数）；无法与搜索结果对应的来源一律不要输出
 5. source_name 只能取自搜索结果中出现的信息；published_at 只能取自对应结果的 published_date，为「未知」时输出空字符串，不得推测或编造日期
 6. 忽略无关、过时、重复信息；若没有重要变化，返回 {"has_progress": false, "title": "", "summary": "本轮执行情况总结", "source": []}
 
-必须输出一个 JSON 对象，格式为 {"has_progress": true, "title": "标题", "summary": "本轮执行情况总结，1-3句", "source": [{"title": "来源标题", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "importance": 8}]}，不要输出其它内容。`;
+必须输出一个 JSON 对象，格式为 {"has_progress": true, "title": "标题", "summary": "本轮执行情况总结，1-3句", "source": [{"title": "来源标题", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "why": "命中触发条件的哪一点"}]}，不要输出其它内容。`;
 }

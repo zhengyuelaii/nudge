@@ -97,7 +97,6 @@ describe('runCheck', () => {
           source_url: 'https://example.com/news/1',
           source_name: '东方财富',
           published_at: '2026-08-18',
-          importance: 8,
         },
       ],
     });
@@ -139,7 +138,6 @@ describe('runCheck', () => {
         {
           title: '华友钴业小动态',
           source_url: 'https://example.com/news/2',
-          importance: 5,
         },
       ],
     });
@@ -181,47 +179,43 @@ describe('runCheck', () => {
     expect(run.status).toBe('success');
   });
 
-  it('filters out sources below importance threshold but keeps the event', async () => {
+  it('writes every source the model returns, without any importance filtering', async () => {
     const fetchImpl = mockFetch({
       'api.tavily.com': SEARCH_RESULTS,
       'open.feishu.cn': { code: 0, msg: 'success' },
     });
     const model = mockModel({
       has_progress: true,
-      title: '真正进展',
+      title: '本轮进展',
       summary: '本轮有实质进展',
       source: [
-        { title: '重复旧闻', source_url: 'https://example.com/old', importance: 3 },
-        { title: '一般消息', source_url: 'https://example.com/meh', importance: 4 },
-        { title: '真正进展', source_url: 'https://example.com/new', importance: 7 },
+        { title: '进展一', source_url: 'https://example.com/a' },
+        { title: '进展二', source_url: 'https://example.com/b' },
+        { title: '进展三', source_url: 'https://example.com/c' },
       ],
     });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });
 
-    expect(result.createdCount).toBe(1);
-    expect(result.notifiedCount).toBe(1);
+    expect(result.createdCount).toBe(3);
+    expect(result.notifiedCount).toBe(3);
 
     const sources = db.prepare('SELECT * FROM source').all() as any[];
-    expect(sources).toHaveLength(1);
-    expect(sources[0].title).toBe('真正进展');
+    expect(sources.map((s) => s.title)).toEqual(['进展一', '进展二', '进展三']);
 
     const event = db.prepare('SELECT * FROM interest_event').get() as any;
-    expect(event.title).toBe('真正进展');
+    expect(event.title).toBe('本轮进展');
   });
 
-  it('creates nothing when all sources fall below the importance threshold', async () => {
+  it('writes nothing when the model claims progress but returns no source', async () => {
     const fetchImpl = mockFetch({
       'api.tavily.com': SEARCH_RESULTS,
     });
     const model = mockModel({
       has_progress: true,
-      title: '低价值更新',
-      summary: '都是无关消息',
-      source: [
-        { title: '无关一', source_url: 'https://example.com/a', importance: 3 },
-        { title: '无关二', source_url: 'https://example.com/b', importance: 4 },
-      ],
+      title: '空进展',
+      summary: '模型声称有进展，却没有给出任何来源',
+      source: [],
     });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });
@@ -298,7 +292,6 @@ describe('runCheck', () => {
         {
           title: '华友钴业重大消息',
           source_url: 'https://example.com/news/3',
-          importance: 9,
         },
       ],
     });
@@ -343,7 +336,7 @@ describe('runCheck', () => {
       has_progress: true,
       title: '重大消息',
       summary: '',
-      source: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 8 }],
+      source: [{ title: '重大消息', source_url: 'https://example.com/x' }],
     });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });
@@ -376,7 +369,7 @@ describe('runCheck', () => {
       has_progress: true,
       title: '重大消息',
       summary: '',
-      source: [{ title: '重大消息', source_url: 'https://example.com/x', importance: 8 }],
+      source: [{ title: '重大消息', source_url: 'https://example.com/x' }],
     });
 
     const result = await runCheck(seedTaskId, { fetchImpl, model });

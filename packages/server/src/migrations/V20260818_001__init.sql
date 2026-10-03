@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS interest (
   tags            TEXT    NOT NULL DEFAULT '[]',
   description     TEXT,
   query_keywords  TEXT,
+  subject         TEXT    NOT NULL DEFAULT '',  -- 关注判据：监控主体（空串表示未配置，退化为无判据）
+  criteria        TEXT    NOT NULL DEFAULT '',  -- 关注判据：触发条件，命中才算「变化」
   channel_ids     TEXT    NOT NULL DEFAULT '[]',  -- 选中的通知渠道 id 数组（JSON），空则回退默认渠道
   status          TEXT    NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active', 'archived')),

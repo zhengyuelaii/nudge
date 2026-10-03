@@ -11,6 +11,8 @@ export interface InterestRow {
   tags: string[];
   description: string | null;
   query_keywords: string | null;
+  subject: string;
+  criteria: string;
   channelIds: number[];
   status: string;
   created_at: string;
@@ -97,8 +99,8 @@ export const interestService = {
     return transaction(() => {
       const result = db
         .prepare(
-          `INSERT INTO interest (user_id, name, tags, description, query_keywords, channel_ids)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO interest (user_id, name, tags, description, query_keywords, subject, criteria, channel_ids)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           userId,
@@ -106,6 +108,8 @@ export const interestService = {
           JSON.stringify(input.tags),
           input.description ?? null,
           input.queryKeywords ?? null,
+          input.subject ?? '',
+          input.criteria ?? '',
           JSON.stringify(input.channelIds ?? []),
         );
 
@@ -132,6 +136,8 @@ export const interestService = {
       if (input.tags !== undefined) { iFields.push('tags = ?'); iValues.push(JSON.stringify(input.tags)); }
       if (input.description !== undefined) { iFields.push('description = ?'); iValues.push(input.description); }
       if (input.queryKeywords !== undefined) { iFields.push('query_keywords = ?'); iValues.push(input.queryKeywords); }
+      if (input.subject !== undefined) { iFields.push('subject = ?'); iValues.push(input.subject); }
+      if (input.criteria !== undefined) { iFields.push('criteria = ?'); iValues.push(input.criteria); }
       if (input.channelIds !== undefined) { iFields.push('channel_ids = ?'); iValues.push(JSON.stringify(input.channelIds)); }
 
       if (iFields.length > 0) {

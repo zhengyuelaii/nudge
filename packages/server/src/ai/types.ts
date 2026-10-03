@@ -10,6 +10,10 @@ export interface InterestBrief {
   name: string;
   query_keywords?: string | null;
   description?: string | null;
+  /** 关注判据：监控主体。与 criteria 同时为空 → 按旧行为分析（无判据） */
+  subject?: string | null;
+  /** 关注判据：触发条件。命中才算「变化」 */
+  criteria?: string | null;
 }
 
 export interface LlmUsage {
@@ -31,7 +35,8 @@ export interface AnalyzedSource {
   source_url: string;
   source_name: string;
   published_at: string;
-  importance: number;
+  /** 为什么构成变化（对应触发条件的哪一点），用于通知正文 */
+  why: string;
 }
 
 export interface AnalyzeResult {
@@ -59,10 +64,10 @@ export const analyzedSourceSchema = z.object({
     .string()
     .optional()
     .describe('信息原始发布时间，只能取自搜索结果的 published_date，未知时留空'),
-  importance: z
-    .number()
+  why: z
+    .string()
     .optional()
-    .describe('重要度 1-10：1-3 无关 / 4-6 一般 / 7-8 重要 / 9-10 重大'),
+    .describe('这条为什么构成变化：对应触发条件的哪一点，一句话；未配置触发条件时说明为何值得关注'),
 });
 
 /** 模型给出的原始来源：字段多为可选，且未经规整（不信任其链接与日期） */
@@ -84,6 +89,6 @@ export function toAnalyzedSource(raw: RawAnalyzedSource): AnalyzedSource {
     source_url: raw.source_url ?? '',
     source_name: raw.source_name ?? '',
     published_at: raw.published_at ?? '',
-    importance: raw.importance ?? 5,
+    why: raw.why ?? '',
   };
 }
