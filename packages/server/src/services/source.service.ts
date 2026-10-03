@@ -82,6 +82,17 @@ export const sourceService = {
     `).all(interestId, userId, limit, offset) as SourceRow[];
   },
 
+  /** 统计某次 task_run 新增的来源数（source 经 event.task_run_id 关联本轮执行） */
+  countByRun(userId: number, taskRunId: number): number {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS c
+      FROM source s
+      INNER JOIN interest_event e ON e.id = s.event_id
+      WHERE s.user_id = ? AND e.task_run_id = ?
+    `).get(userId, taskRunId) as { c: number };
+    return row.c;
+  },
+
   createMany(
     userId: number,
     interestId: number,

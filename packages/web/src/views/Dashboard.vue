@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { api } from '../api/index.js';
+import { timeAgo } from '@/lib/time';
 
 interface Source {
   id: number;
@@ -24,19 +25,6 @@ const sentinel = ref<HTMLElement | null>(null);
 const PAGE_SIZE = 20;
 let pageOffset = 0;
 let observer: IntersectionObserver | null = null;
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr + 'Z');
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}小时前`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 7) return `${diffD}天前`;
-  return `${Math.floor(diffD / 7)}周前`;
-}
 
 async function loadMore() {
   if (loadingMore.value || finished.value) return;

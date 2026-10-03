@@ -1,8 +1,9 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+面向所有 AI coding agent（Claude Code / CodeBuddy / 其他）的项目指引，本文件是**唯一事实来源**。
 
-> 与 `AGENTS.md` 同步维护（后者同样面向其他 AI agent）。改动请两处同改。两者内容一致，以 `AGENTS.md` 为准。
+> `CLAUDE.md` 不复制内容，只有一段说明 + 官方 import 语法 `@AGENTS.md`，启动时把本文件展开给 Claude Code。
+> 因此**改动只改本文件**，不要去改 `CLAUDE.md`。
 
 ## 项目概览
 
@@ -34,7 +35,9 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 - **无迁移框架**。单一幂等文件 `migrations/V20260818_001__init.sql` 每次启动 `CREATE TABLE IF NOT EXISTS`。明确决定不引入迁移 runner；新列直接加进 init SQL 即可。
 - `"update"` 是 SQL 保留字，SQL 里始终双引号。
-- DB 落在 `packages/server/data/nudge.db`，`DB_PATH` 可覆盖；测试强制 `DB_PATH=:memory:`，故改表结构必须同步进 init 文件测试才可见。
+- DB 落在 **`~/.nudge/data/nudge.db`**（`config.ts` 里的 `join(homedir(), '.nudge', 'data', 'nudge.db')`，不在仓库内），`DB_PATH` 可覆盖；测试强制 `DB_PATH=:memory:`，故改表结构必须同步进 init 文件测试才可见。
+- 仓库内**不含任何 db 文件**：`packages/server/data/` 已被 `.gitignore` 忽略，历史残留库已于 2026-10-03 删除。查 schema 只认 `~/.nudge/data/nudge.db` 或 `migrations/V20260818_001__init.sql`。
+- 老库升级靠 `db/client.ts#runMigrations()` 的幂等 ALTER 兜底，它目前只覆盖 4 个列，缺口见 `docs/DATABASE.md` 末尾「历史遗留对象」。**改表结构必须同时改 init.sql 与 client.ts 两处**。
 
 ## Scheduler
 

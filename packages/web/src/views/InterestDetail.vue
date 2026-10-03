@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api/index.js';
+import { timeAgo } from '@/lib/time';
 import CategoryInput from '../components/CategoryInput.vue';
 import { toast } from 'vue-sonner';
 import { Button } from '@/components/ui/button';
@@ -85,6 +86,7 @@ interface TaskRun {
   llm_output_tokens: number | null;
   error_type: string | null;
   error_message: string | null;
+  summary: string | null;
 }
 
 type RunStatusFilter = '' | 'success' | 'failed' | 'running';
@@ -141,18 +143,6 @@ const statusTabs: { key: RunStatusFilter; label: string }[] = [
   { key: 'failed', label: '失败' },
   { key: 'running', label: '执行中' },
 ];
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr + 'Z');
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 60) return `${diffMin}分钟前`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH}小时前`;
-  const diffD = Math.floor(diffH / 24);
-  return `${diffD}天前`;
-}
 
 function goBack() {
   router.back();
@@ -515,6 +505,7 @@ function setChannel(id: number, checked: boolean) {
                 · 输入 {{ run.llm_input_tokens }} / 输出 {{ run.llm_output_tokens ?? 0 }} tok
               </template>
             </div>
+            <div v-if="run.summary" class="truncate text-[11px] text-gray-500" :title="run.summary">{{ run.summary }}</div>
             <div v-if="run.error_message" class="truncate text-[11px] text-red-500">{{ run.error_message }}</div>
           </div>
           <span class="text-[11px] text-gray-400">#{{ run.id }}</span>

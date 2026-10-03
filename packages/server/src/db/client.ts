@@ -44,6 +44,9 @@ function runMigrations(database: DatabaseType): void {
 
   // task_run: update 时代遗留的 updates_created_count 更名为 sources_created_count
   addColumn(database, 'task_run', 'sources_created_count', 'INTEGER');
+
+  // task_run: 模型对本轮执行情况的总结（无进展时也能知道模型做了什么）
+  addColumn(database, 'task_run', 'summary', 'TEXT');
 }
 
 runMigrations(db);

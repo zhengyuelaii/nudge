@@ -108,7 +108,16 @@ function mockModelSequential(steps: Array<{ content: Array<Record<string, unknow
 }
 
 describe('runAgentCheck', () => {
-  it('runs agent loop: search -> save_source -> save_state -> done', async () => {
+  it('runs agent loop: search -> save_source -> report_progress -> done', async () => {
+    // 预置上轮来源（task_run_id 为 NULL），验证记账取本轮增量而非该兴趣历史累计
+    const prevEvent = db
+      .prepare(
+        "INSERT INTO interest_event (user_id, interest_id, title, run_at) VALUES (1, ?, '上轮事件', '2026-08-17 09:00:00')",
+      )
+      .run(seedInterestId);
+    db.prepare('INSERT INTO source (user_id, interest_id, event_id, title) VALUES (1, ?, ?, ?)')
+      .run(seedInterestId, Number(prevEvent.lastInsertRowid), '上轮来源');
+
     const fetchImpl = mockFetch({
       'api.tavily.com': SEARCH_RESULTS,
       'open.feishu.cn': { code: 0, msg: 'success' },
@@ -117,27 +126,30 @@ describe('runAgentCheck', () => {
     const model = mockModelSequential([
       { content: [makeToolCall('web_search', { query: '华友钴业 最新', timeRange: 'week' }, 'c1')] },
       { content: [makeToolCall('save_source', { title: '华友钴业净利创新高', summary: '营收增长', source_url: 'https://example.com/news/1' }, 'c2')] },
-      { content: [makeToolCall('save_state', { summary: '华友钴业上半年业绩创新高', key_points: ['净利润增长'], query_hints_next: ['关注下半年业绩'], has_new_progress: true }, 'c3')] },
-      { content: [makeToolCall('report_progress', { stage: 'done', message: '巡检完成' }, 'c4')] },
+      { content: [makeToolCall('report_progress', { stage: 'done', message: '巡检完成' }, 'c3')] },
     ]);
 
     const result = await runAgentCheck(seedTaskId, { fetchImpl, model });
 
     expect(result.runId).toBeDefined();
     expect(result.stepCount).toBeGreaterThanOrEqual(1);
+    expect(result.savedCount).toBe(1);
 
     const sources = db.prepare('SELECT * FROM source WHERE interest_id = ?').all(seedInterestId) as any[];
-    expect(sources.length).toBeGreaterThanOrEqual(1);
-    expect(sources[0].title).toBe('华友钴业净利创新高');
+    expect(sources).toHaveLength(2);
+    expect(sources.map((s) => s.title)).toContain('华友钴业净利创新高');
 
     const event = db
-      .prepare('SELECT * FROM interest_event WHERE interest_id = ?')
-      .get(seedInterestId) as any;
+      .prepare('SELECT * FROM interest_event WHERE interest_id = ? AND title = ?')
+      .get(seedInterestId, '华友钴业净利创新高') as any;
     expect(event).toBeDefined();
+    expect(event.task_run_id).toBe(result.runId);
 
     const run = taskRunService.get(1, result.runId);
     expect(run.status).toBe('success');
     expect(run.agent_steps).toBeGreaterThanOrEqual(1);
+    expect(run.sources_created_count).toBe(1);
+    expect(run.search_result_count).toBe(1);
   });
 
   it('marks failed when LLM throws', async () => {
@@ -170,17 +182,39 @@ describe('runAgentCheck', () => {
     expect(run.agent_steps).toBe(1);
   });
 
-  it('runs with trace enabled via extra JSON', async () => {
+  it('writes trace into task_run when agent_trace_enabled is true', async () => {
     db.prepare('UPDATE settings SET extra = ? WHERE user_id = 1').run(JSON.stringify({ agent_trace_enabled: true }));
 
     const fetchImpl = mockFetch({ 'api.tavily.com': SEARCH_RESULTS });
-    const model = mockModelSequential([]);
+    const model = mockModelSequential([
+      { content: [makeToolCall('report_progress', { stage: 'thinking', message: '开始巡检' }, 'c1')] },
+    ]);
 
     const result = await runAgentCheck(seedTaskId, { fetchImpl, model });
 
     const run = taskRunService.get(1, result.runId);
     expect(run.status).toBe('success');
-    expect(run.agent_steps).toBe(1);
+    expect(run.agent_steps).toBeGreaterThanOrEqual(1);
+    expect(run.trace).toBeTruthy();
+    const events = JSON.parse(run.trace!) as Array<{ kind: string; stage?: string }>;
+    expect(events.some((e) => e.kind === 'progress' && e.stage === 'thinking')).toBe(true);
+    expect(run.trace_text).toContain('深度思考');
+  });
+
+  it('does not collect trace when extra is non-empty but agent_trace_enabled is false', async () => {
+    db.prepare('UPDATE settings SET extra = ? WHERE user_id = 1').run(JSON.stringify({ agent_trace_enabled: false }));
+
+    const fetchImpl = mockFetch({ 'api.tavily.com': SEARCH_RESULTS });
+    const model = mockModelSequential([
+      { content: [makeToolCall('report_progress', { stage: 'thinking', message: '开始巡检' }, 'c1')] },
+    ]);
+
+    const result = await runAgentCheck(seedTaskId, { fetchImpl, model });
+
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('success');
+    expect(run.trace).toBeNull();
+    expect(run.trace_text).toBeNull();
   });
 
   it('notifies via notify_user tool', async () => {

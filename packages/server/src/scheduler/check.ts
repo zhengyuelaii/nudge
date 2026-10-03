@@ -4,7 +4,7 @@ import { settingsService } from '../services/settings.service.js';
 import { taskRunService, type RunErrorType } from '../services/task-run.service.js';
 import { eventService } from '../services/event.service.js';
 import { sourceService } from '../services/source.service.js';
-import { search, type SearchResult } from '../ai/search.js';
+import { search, type SearchResult } from '../search/index.js';
 import { analyze } from '../ai/llm.js';
 import { notify, type Mailer } from '../notify/index.js';
 
@@ -104,6 +104,7 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
       sourcesCreated: 0,
       llmInputTokens: analyzed.usage.inputTokens,
       llmOutputTokens: analyzed.usage.outputTokens,
+      summary: analyzed.summary || undefined,
     });
     return { runId, searchResultCount: results.length, createdCount: 0, notifiedCount: 0 };
   }
@@ -113,7 +114,7 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
     taskRunId: runId,
     title: analyzed.title || llmSources[0].title,
     runAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
-    summary: analyzed.summary || null,
+    summary: analyzed.summary || undefined,
   });
 
   const createdSources = sourceService.createMany(userId, interest.id, event.id, llmSources.map((s) => ({
@@ -164,6 +165,7 @@ export async function runCheck(taskId: number, opts: CheckOptions = {}): Promise
     sourcesCreated: createdSources.length,
     llmInputTokens: analyzed.usage.inputTokens,
     llmOutputTokens: analyzed.usage.outputTokens,
+    summary: analyzed.summary || undefined,
   });
 
   return {

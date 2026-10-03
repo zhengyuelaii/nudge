@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS task_run (
   llm_total_cost       REAL,
   error_type           TEXT    CHECK (error_type IS NULL OR error_type IN ('search_failed', 'llm_failed', 'notify_failed', 'unknown')),
   error_message        TEXT,
+  summary              TEXT,
   agent_steps          INTEGER,
   trace                TEXT,
   trace_text           TEXT,

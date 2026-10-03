@@ -38,7 +38,7 @@ pnpm dev        # 同时启动 server(8787) + web(5173)
 | 变量 | 说明 | 默认 |
 |---|---|---|
 | `PORT` | 服务端口 | `8787` |
-| `DB_PATH` | SQLite 数据库路径 | `packages/server/data/nudge.db` |
+| `DB_PATH` | SQLite 数据库路径 | `~/.nudge/data/nudge.db` |
 | `NUDGE_SCHEDULER` | 设为 `off` 关闭定时调度 | 开启 |
 
 > AI/搜索/飞书等业务凭证存于数据库 `settings` / `notification_channel` 表，在「设置」页维护。

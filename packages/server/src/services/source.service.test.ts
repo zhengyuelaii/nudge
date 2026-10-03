@@ -92,3 +92,36 @@ describe('sourceService.listByInterest', () => {
     expect(sources).toHaveLength(1);
   });
 });
+
+describe('sourceService.countByRun', () => {
+  function seedRun(): number {
+    const task = db
+      .prepare("INSERT INTO task (user_id, interest_id, frequency, time, enabled) VALUES (1, ?, 'day', '09:00', 1)")
+      .run(seedInterestId);
+    const run = db
+      .prepare("INSERT INTO task_run (user_id, task_id, interest_id, status, started_at) VALUES (1, ?, ?, 'running', datetime('now'))")
+      .run(Number(task.lastInsertRowid), seedInterestId);
+    return Number(run.lastInsertRowid);
+  }
+
+  it('counts only the sources created by that run', () => {
+    const runId = seedRun();
+
+    const runEvent = db
+      .prepare("INSERT INTO interest_event (user_id, interest_id, task_run_id, title, run_at) VALUES (1, ?, ?, '本轮事件', '2026-08-25 11:00:00')")
+      .run(seedInterestId, runId);
+    sourceService.createMany(1, seedInterestId, Number(runEvent.lastInsertRowid), [
+      { title: '本轮来源1' },
+      { title: '本轮来源2' },
+    ]);
+
+    sourceService.createMany(1, seedInterestId, seedEventId, [{ title: '上轮来源' }]);
+
+    expect(sourceService.countByRun(1, runId)).toBe(2);
+  });
+
+  it('returns 0 when the run saved nothing', () => {
+    const runId = seedRun();
+    expect(sourceService.countByRun(1, runId)).toBe(0);
+  });
+});

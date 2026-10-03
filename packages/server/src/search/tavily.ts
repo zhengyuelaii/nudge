@@ -1,23 +1,12 @@
 import { Errors } from '../lib/errors.js';
+import type { SearchProviderFn } from './types.js';
 
-export interface SearchResult {
-  title: string;
-  url: string;
-  content: string;
-  published_date?: string | null;
-}
-
-export async function search(
-  interest: { name: string; query_keywords?: string | null },
-  settings: { search_api_key?: string | null },
-  opts?: { timeRange?: 'day' | 'week' | 'month' | 'year'; maxResults?: number; fetchImpl?: typeof fetch },
-): Promise<SearchResult[]> {
+export const searchTavily: SearchProviderFn = async (params, settings, opts) => {
   const apiKey = settings.search_api_key;
   if (!apiKey) {
     throw Errors.internal('未配置搜索 API Key');
   }
 
-  const query = interest.query_keywords || interest.name;
   const fetchImpl = opts?.fetchImpl ?? fetch;
 
   const res = await fetchImpl('https://api.tavily.com/search', {
@@ -27,10 +16,10 @@ export async function search(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      query,
+      query: params.query,
       topic: 'news',
-      time_range: opts?.timeRange ?? 'week',
-      max_results: opts?.maxResults ?? 10,
+      time_range: params.timeRange,
+      max_results: params.maxResults,
       search_depth: 'basic',
     }),
   });
@@ -56,4 +45,4 @@ export async function search(
       content: r.content ?? '',
       published_date: r.published_date ?? null,
     }));
-}
+};

@@ -4,6 +4,7 @@ import { CircleDotIcon, ExternalLinkIcon } from "@lucide/vue";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Timeline } from "@/components/timeline";
 import { api } from '@/api/index.js';
+import { formatDateTime } from '@/lib/time';
 
 interface Source {
   id: number;
@@ -31,15 +32,6 @@ interface InterestEvent {
 interface Interest {
   id: number;
   name: string;
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + "Z");
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const hh = String(d.getUTCHours()).padStart(2, "0");
-  const mi = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${d.getUTCFullYear()}-${mm}-${dd} ${hh}:${mi}`;
 }
 
 function openUrl(url: string | null) {
@@ -130,7 +122,7 @@ watch(selectedInterestId, () => {
           <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <h3 class="text-sm font-semibold text-gray-900">{{ event.title }}</h3>
             <p v-if="event.summary" class="mt-1 text-xs leading-relaxed text-gray-500">{{ event.summary }}</p>
-            <div class="mt-2 text-[11px] text-gray-400">{{ formatDate(event.run_at) }}</div>
+            <div class="mt-2 text-[11px] text-gray-400">{{ formatDateTime(event.run_at) }}</div>
             <div v-if="event.sources.length > 0" class="mt-3 space-y-1 border-t border-gray-100 pt-3">
               <div
                 v-for="src in event.sources"

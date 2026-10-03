@@ -31,6 +31,17 @@ function failRun(
   taskRunService.fail(userId, runId, errorType, e instanceof Error ? e : new Error(String(e)));
 }
 
+/** settings.extra 容错解析：非法 JSON 或非对象一律当空配置，不因配置脏数据整轮失败 */
+function parseExtra(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function runAgentCheck(
   taskId: number,
   opts: AgentCheckOptions = {},
@@ -41,9 +52,11 @@ export async function runAgentCheck(
   const settings = settingsService.get(userId);
   const runId = taskRunService.start(userId, task.id, interest.id, settings.run_mode);
 
-  const trace = createTrace({ enabled: !!settings.extra });
+  const extra = parseExtra(settings.extra);
+  const traceEnabled = extra.agent_trace_enabled === true;
+  const trace = createTrace({ enabled: traceEnabled });
 
-  const runStats = { notifiedCount: 0 };
+  const runStats = { notifiedCount: 0, searchResultCount: 0 };
 
   const tools = buildTools({
     userId,
@@ -80,20 +93,20 @@ export async function runAgentCheck(
   const steps = result.steps as unknown as Array<{ toolCalls?: Array<{ toolName: string; args: unknown }>; toolResults?: Array<{ toolName: string; result: unknown }>; text?: string }>;
   trace.mergeSteps(steps);
 
-  const sources = sourceService.listByInterest(userId, interest.id, { limit: 1000 });
-  const savedCount = sources.length;
+  // 记账取本轮增量：source 经 event.task_run_id 关联本次 run，避免把历史累计当本轮产出
+  const savedCount = sourceService.countByRun(userId, runId);
   const usage = result.usage ?? { inputTokens: 0, outputTokens: 0 };
 
   taskRunService.succeed(userId, runId, {
-    searchResultCount: sources.length,
+    searchResultCount: runStats.searchResultCount,
     sourcesCreated: savedCount,
     llmInputTokens: usage.inputTokens,
     llmOutputTokens: usage.outputTokens,
     agentSteps: steps.length,
+    ...(traceEnabled ? { trace: trace.toJSON(), traceText: trace.render() } : {}),
   });
 
-  const extra = settings.extra ? JSON.parse(settings.extra) as Record<string, unknown> : {};
-  if (extra.agent_trace_enabled) {
+  if (traceEnabled) {
     const rendered = trace.render();
     if (rendered) {
       console.log(`[agent] task=${taskId} interest="${interest.name}" steps=${steps.length}\n${rendered}`);

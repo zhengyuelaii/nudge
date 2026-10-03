@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { search } from './search.js';
+import { search } from './index.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -13,7 +13,34 @@ function mockFetchOk(body: unknown) {
   });
 }
 
-describe('search', () => {
+describe('search dispatcher', () => {
+  it('throws on unsupported provider', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      search(
+        { name: '华友钴业' },
+        { search_provider: 'bing', search_api_key: 'test-key' },
+        { fetchImpl },
+      ),
+    ).rejects.toThrow('不支持的搜索引擎: bing');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('dispatches to tavily when explicitly configured', async () => {
+    const fetchImpl = mockFetchOk({ results: [] });
+
+    await search(
+      { name: '华友钴业' },
+      { search_provider: 'tavily', search_api_key: 'tvly-test-key' },
+      { fetchImpl },
+    );
+
+    const [url] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.tavily.com/search');
+  });
+});
+
+describe('searchTavily (via dispatcher)', () => {
   it('queries Tavily with the interest and returns normalized results', async () => {
     const fetchImpl = mockFetchOk({
       query: '华友钴业',

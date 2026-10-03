@@ -62,20 +62,6 @@ describe('stateService', () => {
     expect(state!.summary).toBe('新事件');
   });
 
-  it('upsert is a no-op (history lives in events)', () => {
-    expect(() =>
-      stateService.upsert(1, seedInterestId, {
-        summary: 'x',
-        key_points: ['k'],
-        query_hints_next: ['q'],
-        has_new_progress: true,
-        last_checked_at: '2026-08-20 09:00:00',
-      }),
-    ).not.toThrow();
-
-    expect(stateService.get(1, seedInterestId)).toBeNull();
-  });
-
   it('returns null for a non-existent interest', () => {
     expect(stateService.get(1, 99999)).toBeNull();
   });

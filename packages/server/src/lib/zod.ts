@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SEARCH_PROVIDERS } from '../search/index.js';
 
 export const createInterestSchema = z.object({
   name: z.string().min(1).max(200),
@@ -28,7 +29,7 @@ export const updateSettingsSchema = z.object({
   aiBaseUrl: z.string().nullable().optional(),
   aiApiKey: z.string().nullable().optional(),
   aiModel: z.string().nullable().optional(),
-  searchProvider: z.string().nullable().optional(),
+  searchProvider: z.enum(SEARCH_PROVIDERS).nullable().optional(),
   searchApiKey: z.string().nullable().optional(),
   timezone: z.string().nullable().optional(),
   locale: z.string().optional(),

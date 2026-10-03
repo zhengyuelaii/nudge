@@ -16,7 +16,7 @@ export interface InterestStateRow {
 const DEFAULT_USER_ID = 1;
 
 // 历史状态不再单独持久化，统一由 interest_event / source 派生（interest_state 表已废弃）。
-// agent 的 get_last_state / save_state 等工具仍依赖本接口，待 agent 重构后一并移除。
+// 只读视图：agent 的 get_last_state / save_source 据此读取「上轮巡检状态」，没有任何写回入口。
 export const stateService = {
   get(userId = DEFAULT_USER_ID, interestId: number): InterestStateRow | null {
     const event = db
@@ -51,17 +51,4 @@ export const stateService = {
       updated_at: event.run_at,
     };
   },
-
-  // 事件链即历史，无需写回；保留空实现以兼容 agent tool 调用
-  upsert(
-    _userId: number,
-    _interestId: number,
-    _data: {
-      summary: string;
-      key_points: string[];
-      query_hints_next: string[];
-      has_new_progress: boolean;
-      last_checked_at: string;
-    },
-  ): void {},
 };

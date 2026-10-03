@@ -1,6 +1,6 @@
 import { tool, type Tool } from 'ai';
 import { z } from 'zod';
-import { search } from '../ai/search.js';
+import { search } from '../search/index.js';
 import { sourceService } from '../services/source.service.js';
 import { stateService } from '../services/state.service.js';
 import { interestService } from '../services/interest.service.js';
@@ -14,7 +14,7 @@ export interface ToolContext {
   settings: Record<string, unknown> & { ai_api_key?: string | null; ai_base_url?: string | null; ai_model?: string | null; search_api_key?: string | null; search_provider?: string | null };
   runId: number;
   trace: Trace;
-  runStats?: { notifiedCount: number };
+  runStats?: { notifiedCount: number; searchResultCount: number };
   fetchImpl?: typeof fetch;
   mailer?: { sendMail: (mail: { from: string; to: string; subject: string; text: string }) => Promise<unknown> };
 }
@@ -45,6 +45,7 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
           timeRange: input.timeRange,
           maxResults: input.maxResults,
         });
+        if (ctx.runStats) ctx.runStats.searchResultCount += results.length;
         const summary = `查询结果 ${results.length} 条`;
         ctx.trace.push({ kind: 'tool_result', tool: 'web_search', summary, at: nowUtc() });
         return results;
@@ -73,7 +74,7 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
     }),
 
     get_last_state: tool({
-      description: '读取上轮巡检固化的状态，据此判断本轮是否构成新进展。',
+      description: '读取历史事件派生的上轮巡检状态，据此判断本轮是否构成新进展。',
       inputSchema: z.object({}),
       execute: () => {
         const state = stateService.get(ctx.userId, ctx.interest.id);
@@ -114,24 +115,6 @@ export function buildTools(ctx: ToolContext): Record<string, Tool> {
         const summary = row ? `保存1条新来源: ${row.title}` : '重复内容，已跳过';
         ctx.trace.push({ kind: 'tool_result', tool: 'save_source', summary, at: nowUtc() });
         return row ? { saved: true, id: row.id } : { saved: false, duplicate: true };
-      },
-    }),
-
-    save_state: tool({
-      description: '本轮巡检结束前调用，固化状态总结供下轮判断是否有新进展。',
-      inputSchema: z.object({
-        summary: z.string().describe('本轮后该兴趣整体状态一句话'),
-        key_points: z.array(z.string()).describe('当前已知关键点（含历史）'),
-        query_hints_next: z.array(z.string()).describe('下次查询建议词/角度'),
-        has_new_progress: z.boolean().describe('本轮是否有新进展'),
-      }),
-      execute: (input: { summary: string; key_points: string[]; query_hints_next: string[]; has_new_progress: boolean }) => {
-        stateService.upsert(ctx.userId, ctx.interest.id, {
-          ...input,
-          last_checked_at: nowUtc(),
-        });
-        ctx.trace.push({ kind: 'tool_result', tool: 'save_state', summary: '状态已固化', at: nowUtc() });
-        return { saved: true };
       },
     }),
 

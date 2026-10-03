@@ -88,20 +88,6 @@ describe('agent tools', () => {
     });
   });
 
-  describe('save_state', () => {
-    it('returns saved without persisting (no-op until agent refactor)', async () => {
-      const tools = buildTools(makeCtx());
-      const result = await (tools.save_state.execute as Function)({
-        summary: '黄金价格稳定',
-        key_points: ['价格在 2000'],
-        query_hints_next: ['关注美联储'],
-        has_new_progress: true,
-      });
-
-      expect(result.saved).toBe(true);
-    });
-  });
-
   describe('report_progress', () => {
     it('pushes progress event to trace', async () => {
       const trace = createTrace({ enabled: true });
@@ -140,6 +126,29 @@ describe('agent tools', () => {
       const result = await (tools.get_recent_sources.execute as Function)({ limit: 5 });
       expect(result).toHaveLength(1);
       expect(result[0].title).toBe('测试来源');
+    });
+  });
+
+  describe('web_search', () => {
+    it('counts returned results into runStats', async () => {
+      const fetchImpl = (async () =>
+        new Response(
+          JSON.stringify({
+            results: [
+              { title: 'A', url: 'https://example.com/a', content: 'a' },
+              { title: 'B', url: 'https://example.com/b', content: 'b' },
+            ],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch;
+
+      const runStats = { notifiedCount: 0, searchResultCount: 0 };
+      const tools = buildTools(makeCtx({ fetchImpl, runStats }));
+
+      const results = await (tools.web_search.execute as Function)({ query: '华友钴业 最新' });
+
+      expect(results).toHaveLength(2);
+      expect(runStats.searchResultCount).toBe(2);
     });
   });
 });

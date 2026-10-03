@@ -2,7 +2,7 @@ import { generateText, Output, type LanguageModel } from 'ai';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { z } from 'zod';
 import { Errors } from '../lib/errors.js';
-import type { SearchResult } from './search.js';
+import type { SearchResult } from '../search/index.js';
 
 export interface AnalyzedSource {
   title: string;
@@ -58,7 +58,7 @@ export interface AnalyzeOptions {
 const outputSchema = z.object({
   has_progress: z.boolean().describe('相比目前已知状态是否有实质进展（新变化/进展/重要动态），否则为 false'),
   title: z.string().describe('本轮更新的事件标题，简明扼要'),
-  summary: z.string().describe('本轮变化的中文摘要，1-3 句话'),
+  summary: z.string().describe('本轮执行情况的中文总结（检索内容与结论），1-3 句话，无进展时也必须填写'),
   source: z.array(analyzedSourceSchema).describe('构成本轮进展的来源列表，最多 8 条'),
 });
 
@@ -110,12 +110,12 @@ ${results
 
 输出规则：
 1. has_progress=true 表示相比目前已知状态有实质进展（新变化/新进展），false 表示只是已知信息的重复或无关内容
-2. title 为本轮更新的事件标题，summary 为本轮变化的中文摘要（1-3 句）
+2. title 为本轮更新的事件标题；summary 为本轮执行情况的中文总结（1-3 句）：检索了什么、结论是什么，无论是否有进展都必须填写
 3. source 数组列出构成本轮进展的来源，最多 8 条；source 内 importance 为目标估值 1-10：重大(9-10)/重要(7-8)/一般(4-6)/无关(1-3)，无关来源不要放进 source
 4. source_url 和 source_name 必须从上方搜索结果中提取，不许编造
-5. 忽略无关、过时、重复信息；若没有重要变化，返回 {"has_progress": false, "title": "", "summary": "", "source": []}
+5. 忽略无关、过时、重复信息；若没有重要变化，返回 {"has_progress": false, "title": "", "summary": "本轮执行情况总结", "source": []}
 
-必须输出一个 JSON 对象，格式为 {"has_progress": true, "title": "标题", "summary": "1-3句摘要", "source": [{"title": "来源标题", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "importance": 8}]}，不要输出其它内容。`;
+必须输出一个 JSON 对象，格式为 {"has_progress": true, "title": "标题", "summary": "本轮执行情况总结，1-3句", "source": [{"title": "来源标题", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "importance": 8}]}，不要输出其它内容。`;
 
   const result = await generateText({
     model,
