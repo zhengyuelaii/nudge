@@ -387,4 +387,79 @@ describe('runCheck', () => {
     expect(run.status).toBe('failed');
     expect(run.error_type).toBe('notify_failed');
   });
+
+  it('marks the run failed when the model output cannot be parsed', async () => {
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+      'open.feishu.cn': { code: 0, msg: 'success' },
+    });
+    const model = mockModel({ elements: [] });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(result.createdCount).toBe(0);
+
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('failed');
+    expect(run.error_type).toBe('llm_failed');
+    expect(run.error_message).toContain('LLM 输出结构不符合预期');
+    // 解析失败但 token 已经消耗，必须记账
+    expect(run.llm_input_tokens).toBe(10);
+    expect(run.llm_output_tokens).toBe(20);
+    expect(run.summary).toBeNull();
+  });
+
+  it('skips the LLM entirely when search returns no results', async () => {
+    const fetchImpl = mockFetch({ 'api.tavily.com': { results: [] } });
+    let llmCalls = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        llmCalls += 1;
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ has_progress: false, title: '', summary: '', source: [] }) }],
+          finishReason: { unified: 'stop', raw: undefined },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 20, text: 20, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+
+    const result = await runCheck(seedTaskId, { fetchImpl, model });
+
+    expect(llmCalls).toBe(0);
+    expect(result.createdCount).toBe(0);
+
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('success');
+    expect(run.search_result_count).toBe(0);
+    expect(run.summary).toBe('搜索未返回结果，已跳过 LLM 分析');
+    // 搜索零结果由 analyze 内部短路，token 计 0（模型没有被调用）
+    expect(run.llm_input_tokens).toBe(0);
+  });
+
+  it('fails before spending a search call when the AI key is missing', async () => {
+    db.prepare('UPDATE settings SET ai_api_key = NULL WHERE user_id = 1').run();
+
+    const calledUrls: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      calledUrls.push(String(input));
+      throw new Error('不该发起任何外部请求');
+    }) as typeof fetch;
+
+    const result = await runCheck(seedTaskId, {
+      fetchImpl,
+      model: mockModel({ has_progress: false, title: '', summary: '', source: [] }),
+    });
+
+    expect(calledUrls).toHaveLength(0);
+
+    const run = taskRunService.get(1, result.runId);
+    expect(run.status).toBe('failed');
+    expect(run.error_type).toBe('llm_failed');
+    expect(run.error_message).toBe('未配置 AI API Key');
+    expect(run.search_result_count).toBeNull();
+  });
 });

@@ -29,7 +29,7 @@ pnpm lint     # pnpm -r lint = server eslint --fix + web vue-tsc
 
 ## Server 布局
 
-`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = search → LLM 分析 → 写 event+source → notify → 记 task_run）、`ai/` search+llm、`agent/` Agent Loop、`notify/` 飞书+邮件、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/events` `/sources` `/task-runs`。
+`routes/` Hono 路由（按资源、zod 校验）、`services/` DB 访问、`scheduler/` 流水线（`check.ts` = 调 `analyze` → 写 event+source → notify → 记 task_run）、`ai/` 分析链路（`llm.ts` 编排：内部先检索再调模型，另有 `model`/`prompt`/`types` 三个职责模块）、`search/` 搜索 provider、`agent/` Agent Loop、`notify/`（`index.ts` 单渠道发送 + `dispatch.ts` 事件级分发）、`db/`、`lib/`（errors/http/time/zod/hash）、`migrations/`。路由聚合见 `routes/index.ts`：`/health` `/settings` `/notification-channels` `/interests` `/events` `/sources` `/task-runs`。
 
 ## SQLite / 迁移
 
