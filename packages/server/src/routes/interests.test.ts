@@ -30,7 +30,7 @@ beforeEach(() => {
 });
 
 describe('POST /api/interests/:id/check', () => {
-  it('returns check result and refreshes last_run_at without touching next_run_at', async () => {
+  it('returns check result and rolls next_run_at forward so the scheduler does not re-run it', async () => {
     const before = db.prepare('SELECT last_run_at, next_run_at FROM task WHERE id = ?').get(seedTaskId) as any;
 
     const res = await app.request(`/api/interests/${seedInterestId}/check`, { method: 'POST' });
@@ -46,7 +46,8 @@ describe('POST /api/interests/:id/check', () => {
     const after = db.prepare('SELECT last_run_at, next_run_at FROM task WHERE id = ?').get(seedTaskId) as any;
     expect(after.last_run_at).toBeTruthy();
     expect(after.last_run_at).not.toBe(before.last_run_at);
-    expect(after.next_run_at).toBe(before.next_run_at);
+    // 手动执行也算跑过这个周期：否则 next_run_at 停在已过期的时刻，下一分钟调度会再跑一遍
+    expect(after.next_run_at).not.toBe(before.next_run_at);
   });
 
   it('returns 404 when the interest does not exist', async () => {

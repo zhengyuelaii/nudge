@@ -109,6 +109,29 @@ describe('runDueTasks', () => {
     expect(calls[0]).toBe(seedTaskId);
   });
 
+  it('claims the whole due batch up front, so a slow task cannot let another tick re-run a later one', async () => {
+    // seedTaskId 的 next_run_at 更早 → 排在前面，先跑它并把它卡住
+    db.prepare('UPDATE task SET next_run_at = ? WHERE id = ?').run('2026-08-18 08:00:00', seedTaskId);
+
+    const calls: number[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const runner = async (taskId: number) => {
+      calls.push(taskId);
+      if (taskId === seedTaskId) await gate;
+    };
+
+    const first = runDueTasks({ runner, now: '2026-08-19 10:00:00' });
+    // 第一个任务还在跑，后面的任务还排在队列里 —— 但整批必须已经被认领
+    const second = runDueTasks({ runner, now: '2026-08-19 10:00:00' });
+
+    release();
+    await Promise.all([first, second]);
+
+    // 没有「整批先认领」时，second 会把 otherTaskId 再跑一遍
+    expect(calls).toEqual([seedTaskId, otherTaskId]);
+  });
+
   it('does not run tasks that are not yet due', async () => {
     db.prepare('UPDATE task SET next_run_at = ? WHERE id != ?').run('2026-08-20 09:00:00', otherTaskId);
     const calls: number[] = [];
@@ -120,5 +143,37 @@ describe('runDueTasks', () => {
 
     expect(executed).toEqual([otherTaskId]);
     expect(calls).toEqual([otherTaskId]);
+  });
+
+  it('reaps a stale running run before picking due tasks', async () => {
+    db.prepare('DELETE FROM task WHERE id != ?').run(seedTaskId);
+    db.prepare(
+      `INSERT INTO task_run (user_id, task_id, interest_id, status, started_at)
+       VALUES (1, ?, (SELECT interest_id FROM task WHERE id = ?), 'running', ?)`,
+    ).run(seedTaskId, seedTaskId, '2026-08-19 09:30:00');
+
+    const executed = await runDueTasks({ runner: async () => {}, now: '2026-08-19 10:00:00' });
+
+    expect(executed).toEqual([seedTaskId]);
+    const stale = db.prepare('SELECT status, error_type FROM task_run').get() as any;
+    expect(stale.status).toBe('failed');
+    expect(stale.error_type).toBe('unknown');
+  });
+
+  it('a throwing task does not stop the remaining due tasks', async () => {
+    db.prepare('UPDATE task SET next_run_at = ? WHERE id = ?').run('2026-08-18 08:00:00', seedTaskId);
+    const calls: number[] = [];
+    const runner = async (taskId: number) => {
+      calls.push(taskId);
+      if (taskId === seedTaskId) throw new Error('boom');
+    };
+
+    const executed = await runDueTasks({ runner, now: '2026-08-19 10:00:00' });
+
+    expect(calls).toEqual([seedTaskId, otherTaskId]);
+    expect(executed).toEqual([otherTaskId]);
+
+    const failed = db.prepare('SELECT next_run_at FROM task WHERE id = ?').get(seedTaskId) as any;
+    expect(failed.next_run_at).toBe('2026-08-18 08:00:00');
   });
 });

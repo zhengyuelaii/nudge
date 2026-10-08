@@ -52,6 +52,28 @@ export async function runAgentCheck(
   const settings = settingsService.get(userId);
   const runId = taskRunService.start(userId, task.id, interest.id, settings.run_mode);
 
+  try {
+    return await executeAgentCheck(taskId, userId, interest, settings, runId, opts);
+  } catch (e) {
+    // start 之后的异常若逃逸，run 会永远停在 running（执行历史卡在「执行中」）
+    try {
+      failRun(userId, runId, 'unknown', e);
+    } catch (failError) {
+      console.error('[agent] 兜底标记 run 失败时又出错:', failError);
+    }
+    return { runId, stepCount: 0, savedCount: 0, notifiedCount: 0 };
+  }
+}
+
+/** runAgentCheck 主体：自身能识别的失败都已记账并正常返回，其余异常交给 runAgentCheck 兜底 */
+async function executeAgentCheck(
+  taskId: number,
+  userId: number,
+  interest: ReturnType<typeof interestService.get>,
+  settings: ReturnType<typeof settingsService.get>,
+  runId: number,
+  opts: AgentCheckOptions,
+): Promise<AgentCheckResult> {
   const extra = parseExtra(settings.extra);
   const traceEnabled = extra.agent_trace_enabled === true;
   const trace = createTrace({ enabled: traceEnabled });

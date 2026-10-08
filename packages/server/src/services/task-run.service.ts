@@ -29,6 +29,12 @@ export interface TaskRunRow {
 
 export type RunErrorType = 'search_failed' | 'llm_failed' | 'notify_failed' | 'unknown';
 
+/**
+ * 超过该时长仍处于 running 的记录，视为执行已中断（进程崩溃/被 kill/异常逃逸）。
+ * 调度每分钟据此回收，并与 findDueTasks 的「陈旧 running 不再阻塞重跑」判定同源。
+ */
+export const STALE_RUNNING_MINUTES = 10;
+
 export interface TaskRunListParams {
   interestId?: number;
   status?: string;
@@ -103,6 +109,43 @@ export const taskRunService = {
       .prepare(`SELECT COUNT(*) AS c FROM task_run r WHERE ${where}`)
       .get(...values) as { c: number };
     return row.c;
+  },
+
+  /**
+   * 回收陈旧的 running 记录，返回回收条数。
+   *
+   * succeed/fail 只在正常流程里被调用；进程崩溃、被 kill 或异常逃逸时 run 来不及收尾，
+   * 会永久停在 running（执行历史卡在「执行中」）。由调度每分钟兜底扫描一次。
+   */
+  reapStale(
+    userId: number,
+    staleMinutes = STALE_RUNNING_MINUTES,
+    now = nowUtc(),
+  ): number {
+    const cutoff = new Date(new Date(now + 'Z').getTime() - staleMinutes * 60_000)
+      .toISOString()
+      .replace('T', ' ')
+      .slice(0, 19);
+
+    const result = db
+      .prepare(
+        `UPDATE task_run
+         SET status = 'failed',
+             finished_at = ?,
+             duration_ms = (strftime('%s', ?) - strftime('%s', started_at)) * 1000,
+             error_type = 'unknown',
+             error_message = ?
+         WHERE user_id = ? AND status = 'running' AND started_at <= ?`,
+      )
+      .run(
+        now,
+        now,
+        `执行中断：超过 ${staleMinutes} 分钟未结束，已自动标记为失败`,
+        userId,
+        cutoff,
+      );
+
+    return result.changes;
   },
 
   succeed(

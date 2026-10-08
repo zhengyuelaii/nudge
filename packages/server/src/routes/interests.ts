@@ -57,7 +57,9 @@ interests.post('/:id/check', async (c) => {
   const interest = interestService.get(1, id);
   try {
     const result = await runCheck(interest.task_id);
-    interestService.markTaskRun(1, interest.task_id, { advanceNext: false });
+    // advanceNext: true —— 手动执行也算跑过这个周期。
+    // 否则 next_run_at 仍停在已过期的时刻，调度下一分钟就会把同一个兴趣再跑一遍。
+    interestService.markTaskRun(1, interest.task_id, { advanceNext: true });
     return jsonOk(c, result);
   } catch (e) {
     const err = e as Error;

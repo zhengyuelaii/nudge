@@ -205,4 +205,40 @@ describe('taskRunService', () => {
     expect(taskRunService.count(1)).toBe(3);
     expect(taskRunService.count(1, { interestId: seedInterestId })).toBe(3);
   });
+
+  it('reapStale marks a long-running run as failed', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+    db.prepare('UPDATE task_run SET started_at = ? WHERE id = ?').run('2026-08-19 09:30:00', runId);
+
+    const reaped = taskRunService.reapStale(1, 10, '2026-08-19 10:00:00');
+
+    expect(reaped).toBe(1);
+    const row = db.prepare('SELECT * FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.status).toBe('failed');
+    expect(row.error_type).toBe('unknown');
+    expect(row.finished_at).toBe('2026-08-19 10:00:00');
+    expect(row.duration_ms).toBe(30 * 60 * 1000);
+    expect(row.error_message).toContain('执行中断');
+  });
+
+  it('reapStale leaves a recent running run alone', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+    db.prepare('UPDATE task_run SET started_at = ? WHERE id = ?').run('2026-08-19 09:55:00', runId);
+
+    expect(taskRunService.reapStale(1, 10, '2026-08-19 10:00:00')).toBe(0);
+
+    const row = db.prepare('SELECT status FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.status).toBe('running');
+  });
+
+  it('reapStale does not touch finished runs', () => {
+    const runId = taskRunService.start(1, seedTaskId, seedInterestId);
+    taskRunService.succeed(1, runId);
+    db.prepare('UPDATE task_run SET started_at = ? WHERE id = ?').run('2026-08-19 09:00:00', runId);
+
+    expect(taskRunService.reapStale(1, 10, '2026-08-19 10:00:00')).toBe(0);
+
+    const row = db.prepare('SELECT status FROM task_run WHERE id = ?').get(runId) as any;
+    expect(row.status).toBe('success');
+  });
 });
