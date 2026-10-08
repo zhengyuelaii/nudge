@@ -81,6 +81,32 @@ function mockModel(json: unknown) {
   });
 }
 
+/** 抓取实际发给模型的 prompt 文本，用于断言喂进去的已知状态 */
+function mockModelCapturingPrompt(onPrompt: (text: string) => void) {
+  return new MockLanguageModelV4({
+    doGenerate: async (input) => {
+      const messages = input.prompt as Array<{
+        content: Array<{ type: string; text: string }>;
+      }>;
+      onPrompt(messages.flatMap((m) => m.content.map((c) => c.text)).join('\n'));
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ has_progress: false, title: '', summary: '本轮无进展', source: [] }),
+          },
+        ],
+        finishReason: { unified: 'stop', raw: undefined },
+        usage: {
+          inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 20, text: 20, reasoning: undefined },
+        },
+        warnings: [],
+      };
+    },
+  });
+}
+
 describe('runCheck', () => {
   it('runs the full pipeline: search → analyze → write → notify → success', async () => {
     const fetchImpl = mockFetch({
@@ -122,6 +148,30 @@ describe('runCheck', () => {
     expect(run.llm_input_tokens).toBe(10);
     expect(run.llm_output_tokens).toBe(20);
     expect(run.sources_created_count).toBe(1);
+  });
+
+  it('feeds previous no-progress verdicts into the known state', async () => {
+    // 「无新增量」的轮次不产生 event，只能从 task_run 里捞回来 —— 不喂进去，
+    // 模型就不知道上一轮已经把这条判掉了，会把同一篇旧闻隔天再推一次。
+    taskRunService.succeed(1, taskRunService.start(1, seedTaskId, seedInterestId), {
+      searchResultCount: 10,
+      sourcesCreated: 0,
+      summary: '上一轮判定：多为已知信息的复述，无实质进展',
+    });
+
+    let promptText = '';
+    const fetchImpl = mockFetch({
+      'api.tavily.com': SEARCH_RESULTS,
+      'open.feishu.cn': { code: 0, msg: 'success' },
+    });
+
+    await runCheck(seedTaskId, {
+      fetchImpl,
+      model: mockModelCapturingPrompt((t) => (promptText = t)),
+    });
+
+    expect(promptText).toContain('近期已判定为「无新增量」的轮次');
+    expect(promptText).toContain('上一轮判定：多为已知信息的复述，无实质进展');
   });
 
   it('writes sources without notifying when no channels configured', async () => {

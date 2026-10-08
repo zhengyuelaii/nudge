@@ -13,9 +13,28 @@ import {
  * 这里之外的地方不该直接碰 ai / @ai-sdk 的 API。
  */
 
-/** 抽取类任务用低温度；输出上限兜住模型跑飞时的成本 */
+/**
+ * 抽取类任务用低温度；输出上限兜住模型跑飞时的成本。
+ *
+ * 注意：maxOutputTokens 对推理型模型是**思考 + 正文的总预算**。实测 deepseek-v4-flash 在
+ * CPO 这条兴趣上思考 4000~12000 tok 才吐出第一个字符，上限卡多低都只会得到 text=0 的
+ * 「长度截断」，把上限一路调大只是把墙往后挪（而且 8580 思考 tok 要跑 40s，逼近 60s 超时）。
+ * 真正的解法是关掉思考（见 LLM_PROVIDER_OPTIONS），4000 只是畸形输出时的兜底。
+ */
 const LLM_TEMPERATURE = 0.3;
-const LLM_MAX_OUTPUT_TOKENS = 2000;
+const LLM_MAX_OUTPUT_TOKENS = 4000;
+
+/**
+ * 关掉 DeepSeek 的思考模式。
+ *
+ * 本任务本质是「给定检索结果 + 判据 → 输出一段结构化 JSON」的抽取/分类，不需要长链推理：
+ * 实测 CPO 兴趣开启思考时 reasoning 4000~12000 tok、单次 20~40s 且频繁撞输出上限；
+ * 关闭后 reasoning 归零、4.9s 返回、正文 1192 tok 且 JSON 合法（来源条数还更多）。
+ * 这是修复「CPO 总是被截断」的关键，别当噪音删掉。
+ */
+const LLM_PROVIDER_OPTIONS = {
+  deepseek: { thinking: { type: 'disabled' } },
+} as const;
 
 /** 单次调用超时 + 重试上限：不能让一个卡住的请求拖住整轮 run，也不能无限重试烧钱 */
 const LLM_TIMEOUT_MS = 60_000;
@@ -94,6 +113,7 @@ export async function callAnalyzeModel(
       temperature: LLM_TEMPERATURE,
       maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
       maxRetries: LLM_MAX_RETRIES,
+      providerOptions: LLM_PROVIDER_OPTIONS,
       abortSignal: AbortSignal.timeout(LLM_TIMEOUT_MS),
       prompt,
     });
@@ -106,7 +126,10 @@ export async function callAnalyzeModel(
     outputTokens: result.usage?.outputTokens ?? 0,
   };
 
-  // 被 maxOutputTokens 截断的输出结构必然不完整，明确报出来，别让"半个 JSON"混过去
+  // 被 maxOutputTokens 截断时，AI SDK 会跳过 Output.object 的解析（它只在 finishReason==='stop'
+  // 时才 parseCompleteOutput），result.output 直接是 undefined 且不抛 NoObjectGeneratedError。
+  // 所以这一拦是必需的：不拦就会在 analyze() 里访问 output.source 抛 TypeError，
+  // 被 check.ts 通用 catch 记成 unknown 而不是 llm_failed，错误归因丢失。
   if (result.finishReason === 'length') {
     throw new AnalyzeOutputError(
       `LLM 输出在 ${LLM_MAX_OUTPUT_TOKENS} tokens 处被截断，结构不完整`,

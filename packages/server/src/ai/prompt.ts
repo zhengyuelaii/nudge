@@ -54,7 +54,7 @@ export function buildAnalyzePrompt({
   const criteriaBlock = buildCriteriaBlock(interest);
   const hasCriteria = criteriaBlock !== '';
   const knownStateBlock = knownState
-    ? `目前已知状态（此前的更新记录，用于判断是否构成进展）：\n${knownState}\n\n`
+    ? `目前已知状态（已推送过的进展 + 近期已判定无新增量的轮次，用于判断是否构成进展）：\n${knownState}\n\n`
     : '';
 
   // 让模型知道「现在」是几号：否则判断一条信息算不算新进展只能靠检索时间窗硬猜
@@ -90,7 +90,7 @@ ${resultLines}
 3. source 数组列出构成本轮进展的来源，最多 ${MAX_ANALYZED_SOURCES} 条；每条都必须是「变化」本身，而不是对已知信息的复述；每条都要用 why 一句话说明它命中了触发条件的哪一点（未配置触发条件时说明为何值得关注）
 4. source_url 必须逐字复制上方搜索结果里的 url 字段（不要改写、补全或添加参数）；无法与搜索结果对应的来源一律不要输出
 5. source_name 只能取自搜索结果中出现的信息；published_at 只能取自对应结果的 published_date，为「未知」时输出空字符串，不得推测或编造日期
-6. 忽略无关、过时、重复信息；若没有重要变化，返回 {"has_progress": false, "title": "", "summary": "本轮执行情况总结", "source": []}
+6. 忽略无关、过时、重复信息；出现在「近期已判定为无新增量的轮次」里的内容一律视为重复，即使换了一篇文章报道也不算新进展；若没有重要变化，返回 {"has_progress": false, "title": "", "summary": "本轮执行情况总结", "source": []}
 
 必须输出一个 JSON 对象，格式为 {"has_progress": true, "title": "标题", "summary": "本轮执行情况总结，1-3句", "source": [{"title": "来源标题", "source_url": "https://...", "source_name": "来源名", "published_at": "2026-08-18", "why": "命中触发条件的哪一点"}]}，不要输出其它内容。`;
 }

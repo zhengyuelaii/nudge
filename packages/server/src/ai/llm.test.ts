@@ -188,6 +188,57 @@ describe('analyze', () => {
     });
   });
 
+  it('disables DeepSeek thinking so the budget is not eaten by reasoning tokens', async () => {
+    // maxOutputTokens 是「思考 + 正文」的总预算：CPO 这类长判据兴趣实测思考能吃掉 4000~12000 tok，
+    // 正文一个字符都吐不出来 → finishReason=length → llm_failed。关掉思考是本链路的必需参数。
+    let seen: unknown = 'doGenerate 未被调用';
+    const model = new MockLanguageModelV4({
+      doGenerate: async (input) => {
+        seen = input.providerOptions;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ has_progress: false, title: '', summary: 'x', source: [] }),
+            },
+          ],
+          finishReason: { unified: 'stop', raw: undefined },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 20, text: 20, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+
+    await analyze(interest, settings, { model, fetchImpl });
+
+    expect(seen).toMatchObject({ deepseek: { thinking: { type: 'disabled' } } });
+  });
+
+  it('throws AnalyzeOutputError when the output is cut off by the token cap', async () => {
+    // 撞上 maxOutputTokens 时 SDK 会跳过 Output.object 的解析、result.output 变成 undefined，
+    // 这里锁住「不装死」：必须报 AnalyzeOutputError（→ llm_failed），而不是退化成访问
+    // undefined 的 TypeError（→ 被记成 unknown，错误归因丢失）。
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => ({
+        content: [{ type: 'text', text: '{"has_progress": true, "title": "被截断的来源标' }],
+        finishReason: { unified: 'length', raw: undefined },
+        usage: {
+          inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 4000, text: 4000, reasoning: undefined },
+        },
+        warnings: [],
+      }),
+    });
+
+    await expect(analyze(interest, settings, { model, fetchImpl })).rejects.toMatchObject({
+      name: 'AnalyzeOutputError',
+      usage: { inputTokens: 10, outputTokens: 4000 },
+    });
+  });
+
   it('defaults usage to zero when the model reports no tokens', async () => {
     const model = new MockLanguageModelV4({
       doGenerate: async () => ({
