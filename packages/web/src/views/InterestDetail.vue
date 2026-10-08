@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api } from '../api/index.js';
-import { timeAgo } from '@/lib/time';
+import { timeAgo, formatDateTime } from '@/lib/time';
 import CategoryInput from '../components/CategoryInput.vue';
 import { toast } from 'vue-sonner';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 
 const route = useRoute();
 const router = useRouter();
@@ -79,16 +86,25 @@ interface InterestEvent {
 
 interface TaskRun {
   id: number;
+  task_id: number;
+  interest_id: number;
+  run_mode: string;
   status: string;
   started_at: string;
+  finished_at: string | null;
   duration_ms: number | null;
   search_result_count: number | null;
   sources_created_count: number | null;
   llm_input_tokens: number | null;
   llm_output_tokens: number | null;
+  llm_total_cost: number | null;
   error_type: string | null;
   error_message: string | null;
   summary: string | null;
+  agent_steps: number | null;
+  trace_text: string | null;
+  created_at: string;
+  interest_name?: string;
 }
 
 type RunStatusFilter = '' | 'success' | 'failed' | 'running';
@@ -145,8 +161,37 @@ const statusTabs: { key: RunStatusFilter; label: string }[] = [
   { key: '', label: '全部' },
   { key: 'success', label: '成功' },
   { key: 'failed', label: '失败' },
-  { key: 'running', label: '执行中' },
 ];
+
+const runModeLabel: Record<string, string> = {
+  default: '默认流程',
+  agent: 'Agent 循环',
+};
+
+const errorTypeLabel: Record<string, string> = {
+  search_failed: '检索失败',
+  llm_failed: '模型调用失败',
+  notify_failed: '通知发送失败',
+  unknown: '未知错误',
+};
+
+const detailOpen = ref(false);
+const selectedRun = ref<TaskRun | null>(null);
+
+function openRunDetail(run: TaskRun) {
+  selectedRun.value = run;
+  detailOpen.value = true;
+}
+
+function formatDuration(ms: number | null | undefined) {
+  if (ms == null) return '—';
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+function formatTokens(input: number | null, output: number | null) {
+  if (input == null && output == null) return '—';
+  return `${input ?? 0} / ${output ?? 0}`;
+}
 
 function goBack() {
   router.back();
@@ -225,11 +270,18 @@ async function triggerCheck() {
   if (checking.value) return;
   checking.value = true;
   checkResult.value = '';
+  // 立即执行会让记录经历「执行中 → 成功/失败」，点击之后与返回之后各刷一次列表；
+  // 同时先回到「全部」，否则新产生的记录会被当前筛选条件挡住
+  statusFilter.value = '';
   try {
-    const r = await api.post<{ createdCount: number; notifiedCount: number }>(
+    // 先发起执行再刷新：请求已在途，后端此时已写入 running 记录，列表能立刻看到「执行中」
+    const pending = api.post<{ createdCount: number; notifiedCount: number }>(
       `/interests/${interestId}/check`,
       {},
     );
+    await loadRuns(true);
+
+    const r = await pending;
     checkResult.value = `检查完成：新增 ${r.createdCount} 条动态，已通知 ${r.notifiedCount} 条`;
     const [i, u] = await Promise.all([
       api.get<Interest>(`/interests/${interestId}`),
@@ -237,6 +289,7 @@ async function triggerCheck() {
     ]);
     interest.value = i;
     events.value = u;
+    statusFilter.value = '';
     await loadRuns(true);
   } catch (e: any) {
     toast.error('检查失败: ' + e.message);
@@ -322,7 +375,7 @@ function setChannel(id: number, checked: boolean) {
               <Badge v-for="tag in interest.tags" :key="tag" variant="outline">{{ tag }}</Badge>
               <span>{{ formatSchedule(interest) }}</span>
               <span v-if="interest.last_run_at">上次执行: {{ timeAgo(interest.last_run_at) }}</span>
-              <span v-if="interest.next_run_at">下次执行: {{ interest.next_run_at }}</span>
+              <span v-if="interest.next_run_at">下次执行: {{ formatDateTime(interest.next_run_at) }}</span>
             </div>
           </div>
           <div class="flex items-center gap-1">
@@ -511,8 +564,9 @@ function setChannel(id: number, checked: boolean) {
         <div
           v-for="(run, idx) in runs"
           :key="run.id"
-          class="flex items-center gap-4 px-5 py-3"
+          class="flex cursor-pointer items-center gap-4 px-5 py-3 transition-colors hover:bg-gray-50"
           :class="idx > 0 ? 'border-t border-gray-100' : ''"
+          @click="openRunDetail(run)"
         >
           <Badge :variant="runStatusBadge(run.status).variant" class="w-14 justify-center">
             {{ runStatusBadge(run.status).text }}
@@ -532,6 +586,9 @@ function setChannel(id: number, checked: boolean) {
             <div v-if="run.error_message" class="truncate text-[11px] text-red-500">{{ run.error_message }}</div>
           </div>
           <span class="text-[11px] text-gray-400">#{{ run.id }}</span>
+          <svg class="h-3.5 w-3.5 shrink-0 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
         </div>
       </div>
 
@@ -545,6 +602,116 @@ function setChannel(id: number, checked: boolean) {
         {{ loadingMore ? '加载中...' : `加载更多` }}
       </Button>
     </div>
+
+    <Sheet v-model:open="detailOpen">
+      <SheetContent class="gap-0 p-0" side="right">
+        <template v-if="selectedRun">
+          <SheetHeader class="shrink-0 gap-1.5 border-b border-gray-200 px-5 py-4">
+            <div class="flex items-center gap-2">
+              <Badge :variant="runStatusBadge(selectedRun.status).variant">
+                {{ runStatusBadge(selectedRun.status).text }}
+              </Badge>
+              <SheetTitle>执行详情</SheetTitle>
+              <span class="text-xs text-gray-400">#{{ selectedRun.id }}</span>
+            </div>
+            <SheetDescription>
+              {{ selectedRun.interest_name ?? '—' }} · 开始于 {{ formatDateTime(selectedRun.started_at) }}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+            <section>
+              <h4 class="mb-2 text-xs font-semibold text-gray-700">执行信息</h4>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-3 rounded border border-gray-200 bg-white p-3">
+                <div>
+                  <div class="text-[11px] text-gray-400">开始时间</div>
+                  <div class="text-xs text-gray-800">{{ formatDateTime(selectedRun.started_at) }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">结束时间</div>
+                  <div class="text-xs text-gray-800">{{ selectedRun.finished_at ? formatDateTime(selectedRun.finished_at) : '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">耗时</div>
+                  <div class="text-xs text-gray-800">{{ formatDuration(selectedRun.duration_ms) }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">执行模式</div>
+                  <div class="text-xs text-gray-800">
+                    {{ runModeLabel[selectedRun.run_mode] ?? selectedRun.run_mode }}
+                    <span v-if="selectedRun.agent_steps != null" class="text-gray-400">· {{ selectedRun.agent_steps }} 步</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h4 class="mb-2 text-xs font-semibold text-gray-700">检索与产出</h4>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-3 rounded border border-gray-200 bg-white p-3">
+                <div>
+                  <div class="text-[11px] text-gray-400">搜索结果数</div>
+                  <div class="text-xs text-gray-800">{{ selectedRun.search_result_count ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">新增来源数</div>
+                  <div class="text-xs text-gray-800">{{ selectedRun.sources_created_count ?? '—' }}</div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h4 class="mb-2 text-xs font-semibold text-gray-700">模型用量</h4>
+              <div class="grid grid-cols-2 gap-x-4 gap-y-3 rounded border border-gray-200 bg-white p-3">
+                <div>
+                  <div class="text-[11px] text-gray-400">输入 Tokens</div>
+                  <div class="text-xs text-gray-800">{{ selectedRun.llm_input_tokens ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">输出 Tokens</div>
+                  <div class="text-xs text-gray-800">{{ selectedRun.llm_output_tokens ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">合计 (输入 / 输出)</div>
+                  <div class="text-xs text-gray-800">{{ formatTokens(selectedRun.llm_input_tokens, selectedRun.llm_output_tokens) }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] text-gray-400">成本</div>
+                  <div class="text-xs text-gray-800">
+                    {{ selectedRun.llm_total_cost != null ? '$' + selectedRun.llm_total_cost.toFixed(6) : '—' }}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h4 class="mb-2 text-xs font-semibold text-gray-700">执行摘要</h4>
+              <div class="rounded border border-gray-200 bg-white p-3 text-xs leading-relaxed whitespace-pre-wrap text-gray-700">
+                {{ selectedRun.summary || '—' }}
+              </div>
+            </section>
+
+            <section v-if="selectedRun.error_message">
+              <h4 class="mb-2 text-xs font-semibold text-red-600">
+                失败信息
+                <span v-if="selectedRun.error_type" class="font-normal text-red-400">
+                  （{{ errorTypeLabel[selectedRun.error_type] ?? selectedRun.error_type }}）
+                </span>
+              </h4>
+              <div class="rounded border border-red-200 bg-red-50 p-3 text-xs leading-relaxed whitespace-pre-wrap break-words text-red-700">
+                {{ selectedRun.error_message }}
+              </div>
+            </section>
+
+            <section v-if="selectedRun.trace_text">
+              <h4 class="mb-2 text-xs font-semibold text-gray-700">Agent 轨迹</h4>
+              <pre class="max-h-80 overflow-auto rounded border border-gray-200 bg-gray-50 p-3 text-[11px] leading-relaxed whitespace-pre-wrap text-gray-700">{{ selectedRun.trace_text }}</pre>
+            </section>
+
+            <div class="pb-2 text-center text-[11px] text-gray-300">记录 ID {{ selectedRun.id }} · 创建于 {{ formatDateTime(selectedRun.created_at) }}</div>
+          </div>
+        </template>
+      </SheetContent>
+    </Sheet>
 
     <Dialog :open="showDeleteConfirm" @update:open="showDeleteConfirm = $event">
       <DialogContent class="sm:max-w-[340px]">

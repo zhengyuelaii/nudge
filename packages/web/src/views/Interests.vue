@@ -189,17 +189,20 @@ function formatSchedule(item: Interest) {
     </div>
 
     <Dialog :open="showModal" @update:open="showModal = $event">
-      <DialogContent class="sm:max-w-[420px]">
+      <DialogContent class="sm:max-w-[620px]">
         <DialogHeader>
           <DialogTitle>添加兴趣</DialogTitle>
           <DialogDescription>配置兴趣的基本信息和检查频率</DialogDescription>
         </DialogHeader>
-        <div class="space-y-4 py-2">
-          <div class="space-y-2">
+
+        <!-- 两列排布：长字段跨两列，短字段两两成对，整体高度压到一屏内 -->
+        <div class="grid grid-cols-2 gap-x-4 gap-y-3 py-2">
+          <div class="col-span-2 space-y-2">
             <Label>兴趣名称</Label>
             <Input v-model="form.name" placeholder="输入兴趣描述..." :aria-invalid="submitAttempted && !!formErrors.name" />
             <p v-if="submitAttempted && formErrors.name" class="text-xs text-red-500">{{ formErrors.name }}</p>
           </div>
+
           <div class="space-y-2">
             <Label>分类</Label>
             <CategoryInput
@@ -213,11 +216,13 @@ function formatSchedule(item: Interest) {
             <Label>搜索关键词（可选）</Label>
             <Input v-model="form.queryKeywords" placeholder="留空则使用名称" />
           </div>
-          <div class="space-y-2">
+
+          <div class="col-span-2 space-y-2">
             <Label>监控主体（可选）</Label>
             <Input v-model="form.subject" placeholder="如：美国生物安全法案 / 国际金价 / 华友钴业" />
           </div>
-          <div class="space-y-2">
+
+          <div class="col-span-2 space-y-2">
             <Label>触发条件（可选）</Label>
             <Textarea
               v-model="form.criteria"
@@ -228,25 +233,25 @@ function formatSchedule(item: Interest) {
               填写后只推送命中该条件的变化。请写具体事件（如「新产能投产」「净利同比变动超 30%」），避免「关注动态」「有变化」这类任何新闻都算命中的描述。
             </p>
           </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-2">
-              <Label>检查频率</Label>
-              <Select v-model="form.frequency">
-                <SelectTrigger class="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="day">每天</SelectItem>
-                  <SelectItem value="week">每周</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-2">
-              <Label>执行时间</Label>
-              <Input v-model="form.time" type="time" :aria-invalid="submitAttempted && !!formErrors.time" />
-              <p v-if="submitAttempted && formErrors.time" class="text-xs text-red-500">{{ formErrors.time }}</p>
-            </div>
+
+          <div class="space-y-2">
+            <Label>检查频率</Label>
+            <Select v-model="form.frequency">
+              <SelectTrigger class="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="day">每天</SelectItem>
+                <SelectItem value="week">每周</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          <div class="space-y-2">
+            <Label>执行时间</Label>
+            <Input v-model="form.time" type="time" :aria-invalid="submitAttempted && !!formErrors.time" />
+            <p v-if="submitAttempted && formErrors.time" class="text-xs text-red-500">{{ formErrors.time }}</p>
+          </div>
+
           <div class="space-y-2">
             <Label>备注</Label>
             <Textarea v-model="form.description" rows="2" />
@@ -268,6 +273,7 @@ function formatSchedule(item: Interest) {
             </div>
           </div>
         </div>
+
         <DialogFooter>
           <Button variant="outline" @click="showModal = false">取消</Button>
           <Button :disabled="saving" @click="save">保存</Button>

@@ -22,6 +22,16 @@ export function formatDateTime(input: Date | string): string {
 }
 
 /**
+ * 绝对日期：本地时区的 `YYYY-MM-DD`。
+ * 入参传字符串时按 UTC 解析（见 {@link parseUtc}），传 Date 则原样格式化。
+ * 用于按「天」分组这类只需要日期的场景 —— 直接用 UTC 字符串切片会得到落后一天的分组。
+ */
+export function formatDate(input: Date | string): string {
+  const date = typeof input === 'string' ? parseUtc(input) : input;
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+/**
  * 相对时间；超过一周（≥7 天）回落为 {@link formatDateTime}。
  */
 export function timeAgo(dateStr: string): string {

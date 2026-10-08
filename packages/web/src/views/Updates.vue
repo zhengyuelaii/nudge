@@ -4,7 +4,7 @@ import { CircleDotIcon, ExternalLinkIcon } from "@lucide/vue";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Timeline } from "@/components/timeline";
 import { api } from '@/api/index.js';
-import { formatDateTime } from '@/lib/time';
+import { formatDateTime, formatDate } from '@/lib/time';
 
 interface Source {
   id: number;
@@ -116,8 +116,8 @@ watch(selectedInterestId, () => {
         </Timeline.Media>
 
         <Timeline.Content>
-          <div v-if="event.run_at.slice(0, 10) !== lastDay && (lastDay = event.run_at.slice(0, 10))" class="mb-2 flex h-8 items-center text-xs font-medium text-muted-foreground">
-            {{ event.run_at.slice(0, 10) }}
+          <div v-if="formatDate(event.run_at) !== lastDay && (lastDay = formatDate(event.run_at))" class="mb-2 flex h-8 items-center text-xs font-medium text-muted-foreground">
+            {{ formatDate(event.run_at) }}
           </div>
           <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
             <h3 class="text-sm font-semibold text-gray-900">{{ event.title }}</h3>
