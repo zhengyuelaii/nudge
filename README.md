@@ -43,6 +43,25 @@ pnpm dev        # 同时启动 server(8787) + web(5173)
 
 > AI/搜索/飞书等业务凭证存于数据库 `settings` / `notification_channel` 表，在「设置」页维护。
 
+## 部署
+
+需要一台常驻 Linux 主机（定时调度跑在进程内，进程停了就不再触发）和持久磁盘。
+
+```bash
+cd deploy
+bash setup.sh                 # 生成配置，并打印用户名与密码
+docker compose up -d --build
+```
+
+打开 `http://<主机IP>:8080` 即可。数据库在 `deploy/data/nudge.db`，容器重建不丢；代码更新后重新 `docker compose up -d --build`。
+
+`deploy/.env` 可按需调整：
+
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `HTTP_PORT` | 对外端口 | `8080` |
+| `TZ` | 容器时区 | `UTC` |
+
 ## 目录结构
 
 ```
@@ -56,8 +75,10 @@ packages/
 
 ```bash
 pnpm lint      # ESLint + vue-tsc
-pnpm test      # 后端 vitest 测试
 pnpm build     # shared → server → web
+
+pnpm --filter @nudge/server test       # 后端 vitest 测试（根目录没有 test 脚本）
+pnpm --filter @nudge/server test:e2e   # E2E：真调 Tavily + DeepSeek，缺 key 自动跳过
 ```
 
 ## License

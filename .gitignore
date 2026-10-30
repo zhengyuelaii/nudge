@@ -19,6 +19,10 @@ packages/server/data/
 # 设计文档
 docs/
 
+# 部署产物（凭据与运行时数据）
+deploy/data/
+deploy/auth.caddyfile
+
 # 日志与系统文件
 *.log
 .DS_Store
