@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SEARCH_PROVIDERS } from '../search/index.js';
+import { AI_PROVIDER_KINDS } from '../ai/providers.js';
 
 export const createInterestSchema = z.object({
   name: z.string().min(1).max(200),
@@ -32,12 +33,37 @@ export const updateSettingsSchema = z.object({
   aiBaseUrl: z.string().nullable().optional(),
   aiApiKey: z.string().nullable().optional(),
   aiModel: z.string().nullable().optional(),
+  aiProviderId: z.number().int().positive().nullable().optional(),
   searchProvider: z.enum(SEARCH_PROVIDERS).nullable().optional(),
   searchApiKey: z.string().nullable().optional(),
   timezone: z.string().nullable().optional(),
   locale: z.string().optional(),
   runMode: z.enum(['default', 'agent']).optional(),
   extra: z.record(z.unknown()).nullable().optional(),
+});
+
+export const createAiProviderSchema = z.object({
+  kind: z.enum(AI_PROVIDER_KINDS),
+  // 名称留空则由服务端取已知供应商的展示名
+  name: z.string().max(50).optional(),
+  // 已知供应商可留空（服务端用预设地址），custom 必填
+  baseUrl: z.string().nullable().optional(),
+  apiKey: z.string().nullable().optional(),
+  model: z.string().max(100).nullable().optional(),
+});
+
+export const updateAiProviderSchema = z.object({
+  name: z.string().max(50).optional(),
+  baseUrl: z.string().nullable().optional(),
+  apiKey: z.string().nullable().optional(),
+  model: z.string().max(100).nullable().optional(),
+});
+
+/** 未保存的供应商也要能拉模型列表（弹窗里边填边试），故允许直接传地址与密钥 */
+export const probeModelsSchema = z.object({
+  id: z.number().int().positive().optional(),
+  baseUrl: z.string().nullable().optional(),
+  apiKey: z.string().nullable().optional(),
 });
 
 export const createChannelSchema = z.object({
@@ -60,5 +86,8 @@ export const updateChannelSchema = z.object({
 export type CreateInterestInput = z.infer<typeof createInterestSchema>;
 export type UpdateInterestInput = z.infer<typeof updateInterestSchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
+export type CreateAiProviderInput = z.infer<typeof createAiProviderSchema>;
+export type UpdateAiProviderInput = z.infer<typeof updateAiProviderSchema>;
+export type ProbeModelsInput = z.infer<typeof probeModelsSchema>;
 export type CreateChannelInput = z.infer<typeof createChannelSchema>;
 export type UpdateChannelInput = z.infer<typeof updateChannelSchema>;

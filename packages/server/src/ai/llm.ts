@@ -43,7 +43,7 @@ export async function analyze(
   knownState?: string,
 ): Promise<AnalyzeResult> {
   // 先校验 key：缺 key 是必失败的情况，没必要为了发现它先花掉一次搜索调用
-  const model = createAnalyzeModel(settings, opts.model);
+  const { model, providerOptions } = createAnalyzeModel(settings, opts.model);
 
   let results: SearchResult[];
   try {
@@ -65,7 +65,7 @@ export async function analyze(
   }
 
   const prompt = buildAnalyzePrompt({ interest, results, knownState });
-  const { output, usage } = await callAnalyzeModel(model, prompt);
+  const { output, usage } = await callAnalyzeModel(model, prompt, providerOptions);
 
   // 模型偶尔会超量返回，按 prompt 里约定的上限截断
   const source = output.source.slice(0, MAX_ANALYZED_SOURCES).map(toAnalyzedSource);

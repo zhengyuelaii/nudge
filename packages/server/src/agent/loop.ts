@@ -1,5 +1,5 @@
 import { generateText, stepCountIs, type LanguageModel, type ToolSet } from 'ai';
-import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createAnalyzeModel } from '../ai/model.js';
 import { interestService } from '../services/interest.service.js';
 import { settingsService } from '../services/settings.service.js';
 import { taskRunService, type RunErrorType } from '../services/task-run.service.js';
@@ -91,12 +91,8 @@ async function executeAgentCheck(
     mailer: opts.mailer,
   }) as unknown as ToolSet;
 
-  const model =
-    opts.model ??
-    createDeepSeek({
-      baseURL: settings.ai_base_url ?? 'https://api.deepseek.com',
-      apiKey: settings.ai_api_key ?? '',
-    }).chat(settings.ai_model ?? 'deepseek-chat');
+  // 与 analyze 链路共用同一套供应商装配：DeepSeek 关思考等参数不会在 agent 模式下漏掉
+  const { model, providerOptions } = createAnalyzeModel(settings, opts.model);
 
   let result: Awaited<ReturnType<typeof generateText<ToolSet>>> | undefined;
   try {
@@ -105,6 +101,7 @@ async function executeAgentCheck(
       system: buildSystem(interest),
       prompt: buildUserPrompt(interest),
       tools,
+      providerOptions,
       stopWhen: stepCountIs(8),
     });
   } catch (e) {

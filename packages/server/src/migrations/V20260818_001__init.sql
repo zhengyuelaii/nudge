@@ -136,16 +136,37 @@ CREATE INDEX IF NOT EXISTS idx_source_user_created ON source(user_id, created_at
 CREATE INDEX IF NOT EXISTS idx_source_user_event ON source(user_id, event_id);
 
 -- ------------------------------------------------------------
--- 6. settings — 用户配置 (每用户一行)
+-- 6. ai_provider — AI 供应商（每用户可配多个，settings.ai_provider_id 指向当前生效的一个）
+--    kind 为已知供应商标识（openai/deepseek/...），custom 表示自定义 OpenAI 兼容服务
+--    model 为该供应商使用的模型；settings.ai_model 为单供应商时代的遗留列（仅迁移时读取）
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ai_provider (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL DEFAULT 1,
+  kind        TEXT    NOT NULL DEFAULT 'custom',
+  name        TEXT    NOT NULL,
+  base_url    TEXT,
+  api_key     TEXT,
+  model       TEXT,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_provider_user_name ON ai_provider(user_id, name);
+
+-- ------------------------------------------------------------
+-- 7. settings — 用户配置 (每用户一行)
 --    预留多用户：UNIQUE(user_id) 保证每用户一行
 --    单用户自托管场景下 user_id 恒为 1
+--    ai_base_url / ai_api_key 为单供应商时代的遗留列，已改由 ai_provider 承载（仅迁移时读取）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS settings (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id           INTEGER NOT NULL DEFAULT 1,
+  ai_provider_id    INTEGER,
+  ai_model          TEXT,
   ai_base_url       TEXT,
   ai_api_key        TEXT,
-  ai_model          TEXT,
   search_provider   TEXT    DEFAULT 'tavily',
   search_api_key    TEXT,
   timezone          TEXT    NOT NULL DEFAULT 'Asia/Shanghai',
@@ -158,7 +179,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- ------------------------------------------------------------
--- 7. notification_channel — 通知渠道
+-- 8. notification_channel — 通知渠道
 --    每用户可配置多个渠道；每用户至多一个默认渠道（部分唯一索引）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS notification_channel (
@@ -178,7 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_channel_user_type ON notification_channel(user_id
 CREATE UNIQUE INDEX IF NOT EXISTS uq_channel_user_default ON notification_channel(user_id) WHERE is_default = 1;
 
 -- ------------------------------------------------------------
--- 8. schema_migration — 迁移版本（全局，不带 user_id）
+-- 9. schema_migration — 迁移版本（全局，不带 user_id）
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS schema_migration (
   version     TEXT PRIMARY KEY,
@@ -188,7 +209,7 @@ CREATE TABLE IF NOT EXISTS schema_migration (
 );
 
 -- ------------------------------------------------------------
--- 9. notify_log — 通知发送日志（每次发送无论成败都记一条）
+-- 10. notify_log — 通知发送日志（每次发送无论成败都记一条）
 --     channel_id / interest_id / event_id 关联来源；status 标记成功/失败
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS notify_log (

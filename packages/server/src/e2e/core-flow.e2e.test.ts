@@ -148,6 +148,7 @@ describe.skipIf(!HAS_CREDENTIALS)('E2E 核心业务流程（真实 Tavily + 真�
         .get() as { content: string; status: string } | undefined;
 
       // ── 5. 评分（用同一份检索原料做参照，独立模型当评审员） ──
+      const judge = createAnalyzeModel(settingsService.get(1));
       const report = await scoreRun({
         interest: {
           name: interest.name,
@@ -158,7 +159,8 @@ describe.skipIf(!HAS_CREDENTIALS)('E2E 核心业务流程（真实 Tavily + 真�
         sources,
         eventTitle: event?.title ?? null,
         notifyText: notifyLog?.content ?? null,
-        judgeModel: createAnalyzeModel(settingsService.get(1)),
+        judgeModel: judge.model,
+        judgeProviderOptions: judge.providerOptions,
       });
 
       for (const line of report.lines) console.log(line);

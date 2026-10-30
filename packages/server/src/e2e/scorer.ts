@@ -45,6 +45,8 @@ export interface E2EScoreInput {
   notifyText: string | null;
   /** 评审用的模型；调用方负责装配 */
   judgeModel: LanguageModel;
+  /** 评审模型的供应商参数（DeepSeek 关思考），与巡检链路保持一致 */
+  judgeProviderOptions?: Parameters<typeof generateText>[0]['providerOptions'];
 }
 
 // ── 输出 ────────────────────────────────────────────────
@@ -411,6 +413,7 @@ async function judgeQuality(input: E2EScoreInput): Promise<JudgeVerdict> {
     temperature: 0,
     maxOutputTokens: JUDGE_MAX_OUTPUT_TOKENS,
     maxRetries: 2,
+    providerOptions: input.judgeProviderOptions,
     abortSignal: AbortSignal.timeout(90_000),
     prompt: buildJudgePrompt(input),
   });

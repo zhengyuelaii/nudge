@@ -24,6 +24,8 @@ export interface AnalyzeSettings {
   ai_base_url?: string | null;
   ai_api_key?: string | null;
   ai_model?: string | null;
+  /** 当前供应商类型（openai/deepseek/custom...），仅用于决定装配方式 */
+  ai_provider_kind?: string | null;
   search_provider?: string | null;
   search_api_key?: string | null;
 }

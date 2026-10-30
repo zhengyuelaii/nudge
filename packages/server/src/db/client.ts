@@ -51,6 +51,46 @@ function runMigrations(database: DatabaseType): void {
   // interest: 关注判据（主体 + 触发条件）。空串表示未配置 → 退化为无判据的旧行为
   addColumn(database, 'interest', 'subject', "TEXT NOT NULL DEFAULT ''");
   addColumn(database, 'interest', 'criteria', "TEXT NOT NULL DEFAULT ''");
+
+  // settings: AI 供应商由单套字段（ai_base_url/ai_api_key）改为独立的 ai_provider 记录
+  addColumn(database, 'settings', 'ai_provider_id', 'INTEGER');
+
+  // ai_provider: 每家供应商各自记住模型，切换供应商即换模型
+  addColumn(database, 'ai_provider', 'model', 'TEXT');
+
+  // 老配置的模型写在 settings.ai_model 上，回填给当前生效的那家，避免切家后模型名丢失
+  database.exec(`
+    UPDATE ai_provider
+    SET model = (SELECT s.ai_model FROM settings s WHERE s.user_id = ai_provider.user_id)
+    WHERE IFNULL(model, '') = ''
+      AND id IN (SELECT ai_provider_id FROM settings WHERE ai_provider_id IS NOT NULL)
+      AND EXISTS (
+        SELECT 1 FROM settings s
+        WHERE s.user_id = ai_provider.user_id AND IFNULL(s.ai_model, '') <> ''
+      )
+  `);
+
+  // 老库平滑升级：单供应商配置搬到 ai_provider，再让 settings 指向它。
+  // 仅在 ai_provider 尚无记录时执行，避免覆盖用户后来新建的供应商。
+  database.exec(`
+    INSERT INTO ai_provider (user_id, kind, name, base_url, api_key)
+    SELECT s.user_id,
+           CASE WHEN IFNULL(s.ai_base_url, '') LIKE '%deepseek%' THEN 'deepseek' ELSE 'custom' END,
+           CASE WHEN IFNULL(s.ai_base_url, '') LIKE '%deepseek%' THEN 'DeepSeek' ELSE '自定义' END,
+           s.ai_base_url,
+           s.ai_api_key
+    FROM settings s
+    WHERE IFNULL(s.ai_api_key, '') <> ''
+      AND NOT EXISTS (SELECT 1 FROM ai_provider p WHERE p.user_id = s.user_id)
+  `);
+  database.exec(`
+    UPDATE settings
+    SET ai_provider_id = (
+      SELECT p.id FROM ai_provider p WHERE p.user_id = settings.user_id ORDER BY p.id LIMIT 1
+    )
+    WHERE ai_provider_id IS NULL
+      AND EXISTS (SELECT 1 FROM ai_provider p WHERE p.user_id = settings.user_id)
+  `);
 }
 
 runMigrations(db);

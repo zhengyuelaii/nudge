@@ -1,6 +1,8 @@
 import { generateText, Output, NoObjectGeneratedError, type LanguageModel } from 'ai';
 import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { Errors } from '../lib/errors.js';
+import { isDeepSeek } from './providers.js';
 import {
   analyzedOutputSchema,
   type AnalyzedOutput,
@@ -73,22 +75,49 @@ function toAnalyzeError(e: unknown): unknown {
 }
 
 /**
+ * 装配好的模型句柄：providerOptions 跟随供应商走（DeepSeek 要关思考，其它不传）。
+ * 调用方拿到后直接交给 callAnalyzeModel / generateText，不必知道底层是哪家。
+ */
+export interface AnalyzeModelHandle {
+  model: LanguageModel;
+  providerOptions?: Parameters<typeof generateText>[0]['providerOptions'];
+}
+
+/**
  * 装配模型。`override` 供测试注入；注意即便注入了模型，仍然要求 key 已配置
  * （保持与旧实现一致的失败语义：缺 key 一律先失败，不因注入了假模型而静默放过）。
+ *
+ * 已知供应商里只有 DeepSeek 走官方 SDK（需要 thinking 参数），其余与自定义供应商
+ * 同走 OpenAI 兼容协议：各家 base_url 不同，协议一致。
  */
 export function createAnalyzeModel(
   settings: AnalyzeSettings,
   override?: LanguageModel,
-): LanguageModel {
+): AnalyzeModelHandle {
   if (!settings.ai_api_key) {
     throw Errors.internal('未配置 AI API Key');
   }
-  if (override) return override;
 
-  return createDeepSeek({
-    baseURL: settings.ai_base_url ?? 'https://api.deepseek.com',
-    apiKey: settings.ai_api_key,
-  }).chat(settings.ai_model ?? 'deepseek-chat');
+  // providerOptions 由供应商决定、与具体模型实例无关，注入测试模型时也要照样带上
+  const deepseek = isDeepSeek(settings.ai_provider_kind, settings.ai_base_url);
+  const providerOptions = deepseek ? LLM_PROVIDER_OPTIONS : undefined;
+
+  if (override) return { model: override, providerOptions };
+
+  const baseURL = settings.ai_base_url ?? 'https://api.deepseek.com/v1';
+  const apiKey = settings.ai_api_key;
+  const modelId = settings.ai_model ?? 'deepseek-chat';
+
+  if (deepseek) {
+    return {
+      model: createDeepSeek({ baseURL, apiKey }).chat(modelId),
+      providerOptions,
+    };
+  }
+
+  return {
+    model: createOpenAICompatible({ name: 'nudge', baseURL, apiKey }).chatModel(modelId),
+  };
 }
 
 /**
@@ -100,6 +129,7 @@ export function createAnalyzeModel(
 export async function callAnalyzeModel(
   model: LanguageModel,
   prompt: string,
+  providerOptions?: AnalyzeModelHandle['providerOptions'],
 ): Promise<{ output: AnalyzedOutput; usage: LlmUsage }> {
   let result;
   try {
@@ -113,7 +143,7 @@ export async function callAnalyzeModel(
       temperature: LLM_TEMPERATURE,
       maxOutputTokens: LLM_MAX_OUTPUT_TOKENS,
       maxRetries: LLM_MAX_RETRIES,
-      providerOptions: LLM_PROVIDER_OPTIONS,
+      providerOptions,
       abortSignal: AbortSignal.timeout(LLM_TIMEOUT_MS),
       prompt,
     });

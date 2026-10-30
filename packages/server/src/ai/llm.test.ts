@@ -212,9 +212,42 @@ describe('analyze', () => {
       },
     });
 
-    await analyze(interest, settings, { model, fetchImpl });
+    const deepseekSettings = {
+      ...settings,
+      ai_provider_kind: 'deepseek',
+      ai_base_url: 'https://api.deepseek.com/v1',
+    };
+    await analyze(interest, deepseekSettings, { model, fetchImpl });
 
     expect(seen).toMatchObject({ deepseek: { thinking: { type: 'disabled' } } });
+  });
+
+  it('does not send DeepSeek-only options to other providers', async () => {
+    // 关思考是 DeepSeek 专有参数，发给 OpenAI 兼容供应商会被当成未知 body 字段。
+    let seen: unknown = 'doGenerate 未被调用';
+    const model = new MockLanguageModelV4({
+      doGenerate: async (input) => {
+        seen = input.providerOptions;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ has_progress: false, title: '', summary: 'x', source: [] }),
+            },
+          ],
+          finishReason: { unified: 'stop', raw: undefined },
+          usage: {
+            inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 20, text: 20, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+
+    await analyze(interest, { ...settings, ai_provider_kind: 'openai' }, { model, fetchImpl });
+
+    expect(seen ?? {}).toEqual({});
   });
 
   it('throws AnalyzeOutputError when the output is cut off by the token cap', async () => {
