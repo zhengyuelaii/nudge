@@ -28,7 +28,6 @@ interface Interest {
   tags: string[];
   description: string | null;
   query_keywords: string | null;
-  subject: string;
   criteria: string;
   status: string;
   created_at: string;
@@ -50,6 +49,8 @@ interface Channel {
 }
 
 const interests = ref<Interest[]>([]);
+/** 正在切换启停的兴趣 id：挡住连点，避免打两次「取反」接口又转回原状态 */
+const togglingIds = new Set<number>();
 const loading = ref(true);
 const showModal = ref(false);
 const existingCategories = ref<string[]>([]);
@@ -64,7 +65,6 @@ const form = ref({
   time: '09:00',
   description: '',
   queryKeywords: '',
-  subject: '',
   criteria: '',
   channelIds: [] as number[],
 });
@@ -104,7 +104,7 @@ async function loadChannels() {
 }
 
 function openAdd() {
-  form.value = { name: '', tags: [], frequency: 'day', time: '09:00', description: '', queryKeywords: '', subject: '', criteria: '', channelIds: [] };
+  form.value = { name: '', tags: [], frequency: 'day', time: '09:00', description: '', queryKeywords: '', criteria: '', channelIds: [] };
   submitAttempted.value = false;
   showModal.value = true;
   void loadCategories();
@@ -123,7 +123,6 @@ async function save() {
       time: form.value.time,
       description: form.value.description || undefined,
       queryKeywords: form.value.queryKeywords || undefined,
-      subject: form.value.subject || undefined,
       criteria: form.value.criteria || undefined,
       channelIds: form.value.channelIds,
     });
@@ -137,11 +136,18 @@ async function save() {
 }
 
 async function toggleEnabled(item: Interest) {
+  if (togglingIds.has(item.id)) return;
+  togglingIds.add(item.id);
   try {
-    await api.put(`/interests/${item.id}/toggle`);
-    await loadInterests();
+    // 原地替换该行，不重拉列表：loadInterests() 开头会把 loading 置 true，
+    // 整个列表被卸载再重建，Switch 的 transition 找不到起点（表现为「闪一下 + 没有动画」）。
+    const updated = await api.put<Interest>(`/interests/${item.id}/toggle`);
+    const idx = interests.value.findIndex((i) => i.id === item.id);
+    if (idx !== -1) interests.value[idx] = updated;
   } catch (e: any) {
     toast.error('切换失败: ' + e.message);
+  } finally {
+    togglingIds.delete(item.id);
   }
 }
 
@@ -215,11 +221,6 @@ function formatSchedule(item: Interest) {
           <div class="space-y-2">
             <Label>搜索关键词（可选）</Label>
             <Input v-model="form.queryKeywords" placeholder="留空则使用名称" />
-          </div>
-
-          <div class="col-span-2 space-y-2">
-            <Label>监控主体（可选）</Label>
-            <Input v-model="form.subject" placeholder="如：美国生物安全法案 / 国际金价 / 华友钴业" />
           </div>
 
           <div class="col-span-2 space-y-2">

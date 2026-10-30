@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { ExternalLinkIcon } from '@lucide/vue';
 import { api } from '../api/index.js';
 import { timeAgo, formatDateTime } from '@/lib/time';
 import CategoryInput from '../components/CategoryInput.vue';
@@ -40,7 +41,6 @@ interface Interest {
   tags: string[];
   description: string | null;
   query_keywords: string | null;
-  subject: string;
   criteria: string;
   status: string;
   created_at: string;
@@ -130,6 +130,7 @@ const PAGE_SIZE = 10;
 const loading = ref(true);
 const checking = ref(false);
 const saving = ref(false);
+const toggling = ref(false);
 const submitAttempted = ref(false);
 const checkResult = ref('');
 const showDeleteConfirm = ref(false);
@@ -141,7 +142,6 @@ const form = ref({
   tags: [] as string[],
   description: '',
   queryKeywords: '',
-  subject: '',
   criteria: '',
   frequency: 'day',
   time: '09:00',
@@ -193,6 +193,10 @@ function formatTokens(input: number | null, output: number | null) {
   return `${input ?? 0} / ${output ?? 0}`;
 }
 
+function openUrl(url: string | null) {
+  if (url) window.open(url, '_blank', 'noopener');
+}
+
 function goBack() {
   router.back();
 }
@@ -216,7 +220,6 @@ async function loadData() {
       tags: i.tags,
       description: i.description ?? '',
       queryKeywords: i.query_keywords ?? '',
-      subject: i.subject ?? '',
       criteria: i.criteria ?? '',
       frequency: i.frequency,
       time: i.time,
@@ -308,7 +311,6 @@ async function save() {
       tags: form.value.tags,
       description: form.value.description || undefined,
       queryKeywords: form.value.queryKeywords || undefined,
-      subject: form.value.subject || undefined,
       criteria: form.value.criteria || undefined,
       frequency: form.value.frequency,
       time: form.value.time,
@@ -333,12 +335,17 @@ async function doDelete() {
 }
 
 async function toggleEnabled() {
-  if (!interest.value) return;
+  if (!interest.value || toggling.value) return;
+  toggling.value = true;
   try {
-    await api.put(`/interests/${interestId}/toggle`);
-    await loadData();
+    // 用接口返回值原地更新，不重拉全量：loadData() 开头会把 loading 置 true，
+    // 整个详情块（含本开关）会被卸载再重建，Switch 的 transition 找不到起点，
+    // 视觉上就是「闪一下 + 没有动画」。启停也不影响相关动态与执行历史，无需重拉。
+    interest.value = await api.put<Interest>(`/interests/${interestId}/toggle`);
   } catch (e: any) {
     toast.error('切换失败: ' + e.message);
+  } finally {
+    toggling.value = false;
   }
 }
 
@@ -421,10 +428,6 @@ function setChannel(id: number, checked: boolean) {
           <div class="space-y-2">
             <Label>搜索关键词（留空则使用名称）</Label>
             <Input v-model="form.queryKeywords" type="text" />
-          </div>
-          <div class="space-y-2">
-            <Label>监控主体（可选）</Label>
-            <Input v-model="form.subject" type="text" placeholder="如：美国生物安全法案 / 国际金价 / 华友钴业" />
           </div>
           <div class="space-y-2">
             <Label>触发条件（可选）</Label>
@@ -531,14 +534,22 @@ function setChannel(id: number, checked: boolean) {
           <div class="mb-1 text-xs text-gray-400">{{ timeAgo(event.run_at) }}</div>
           <h3 class="text-sm font-medium leading-snug text-gray-900">{{ event.title }}</h3>
           <div v-if="event.summary" class="mt-1 text-xs leading-relaxed text-gray-500">{{ event.summary }}</div>
-          <div v-if="event.sources.length > 0" class="mt-2 space-y-1">
+          <div v-if="event.sources.length > 0" class="mt-2 space-y-1 border-t border-gray-100 pt-2">
             <div
               v-for="source in event.sources"
               :key="source.id"
-              class="flex items-center gap-2 text-xs text-gray-400"
+              class="flex items-center gap-1.5 text-xs"
             >
-              <span>{{ source.source_name ?? '未知来源' }}</span>
-              <a v-if="source.source_url" :href="source.source_url" target="_blank" class="text-blue-500 hover:underline">原文</a>
+              <span class="text-gray-400">›</span>
+              <span class="shrink-0 font-medium text-gray-700">{{ source.source_name ?? '未知来源' }}</span>
+              <span class="text-gray-400">-</span>
+              <span
+                class="min-w-0 truncate text-gray-500"
+                :class="source.source_url ? 'cursor-pointer hover:text-gray-900' : ''"
+                :title="source.title"
+                @click="openUrl(source.source_url)"
+              >{{ source.title }}</span>
+              <ExternalLinkIcon v-if="source.source_url" class="size-3 shrink-0 text-gray-300" />
             </div>
           </div>
         </div>
