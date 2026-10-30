@@ -9,6 +9,15 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { CheckIcon, PencilIcon, PlayIcon, Trash2Icon } from '@lucide/vue';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 type Tab = 'general' | 'ai' | 'push' | 'search';
 
@@ -33,14 +42,30 @@ function toggleKey(key: string) {
 }
 
 interface Settings {
-  ai_base_url: string | null;
-  ai_api_key: string | null;
+  ai_provider_id: number | null;
+  ai_provider_kind: string | null;
+  ai_provider_name: string | null;
   ai_model: string | null;
   search_provider: string;
   search_api_key: string | null;
   locale: string;
   run_mode: string;
   extra: string | null;
+}
+
+interface AiProvider {
+  id: number;
+  kind: string;
+  name: string;
+  base_url: string | null;
+  api_key: string | null;
+  model: string | null;
+}
+
+interface KnownProvider {
+  kind: string;
+  name: string;
+  baseUrl: string;
 }
 
 interface Channel {
@@ -52,7 +77,184 @@ interface Channel {
   is_default: number;
 }
 
-const ai = reactive({ baseUrl: '', apiKey: '', model: '' });
+// —— AI 供应商：每用户可存多条，settings.ai_provider_id 指向当前生效的一条 ——
+// 模型随供应商保存（ai_provider.model），启用哪家就用哪家的模型。
+const providers = ref<AiProvider[]>([]);
+const catalog = ref<KnownProvider[]>([]);
+const providerId = ref('');
+
+const currentProvider = computed(
+  () => providers.value.find((p) => String(p.id) === providerId.value) ?? null,
+);
+
+/** 供应商图标块的识别字，仅用文字区分，配色跟随页面中性色 */
+function providerInitial(kind: string): string {
+  switch (kind) {
+    case 'openai':
+      return 'AI';
+    case 'deepseek':
+      return 'D';
+    case 'moonshot':
+      return 'M';
+    case 'zhipu':
+      return 'GLM';
+    case 'qwen':
+      return 'Q';
+    default:
+      return '自';
+  }
+}
+
+async function loadProviders() {
+  const [list, known] = await Promise.all([
+    api.get<AiProvider[]>('/ai-providers'),
+    api.get<KnownProvider[]>('/ai-providers/catalog'),
+  ]);
+  providers.value = list;
+  catalog.value = known;
+}
+
+/** 启用某家供应商：只改 settings.ai_provider_id，模型跟着那家的 model 走 */
+async function activateProvider(target: AiProvider) {
+  if (!loaded.value) return;
+  if (!target.model) {
+    toast.error('请先在「编辑」里为该供应商选择模型');
+    return;
+  }
+  const prev = providerId.value;
+  providerId.value = String(target.id);
+  try {
+    await api.put('/settings', { aiProviderId: target.id });
+  } catch (e: any) {
+    providerId.value = prev;
+    toast.error('启用失败: ' + e.message);
+  }
+}
+
+async function removeProvider(target: AiProvider) {
+  if (!window.confirm(`删除供应商「${target.name}」？`)) return;
+  const wasActive = target.id === currentProvider.value?.id;
+  try {
+    await api.delete(`/ai-providers/${target.id}`);
+    providers.value = providers.value.filter((p) => p.id !== target.id);
+    if (!wasActive) return;
+    const next = providers.value[0];
+    providerId.value = next ? String(next.id) : '';
+    await api.put('/settings', { aiProviderId: next ? next.id : null });
+  } catch (e: any) {
+    toast.error('删除失败: ' + e.message);
+  }
+}
+
+// —— 新增 / 编辑弹窗 ——
+const showDialog = ref(false);
+const savingProvider = ref(false);
+const editingId = ref<number | null>(null);
+const form = reactive({ kind: 'openai', name: '', baseUrl: '', apiKey: '', model: '' });
+const modelList = ref<string[]>([]);
+const modelLoading = ref(false);
+const modelError = ref('');
+
+const isEditing = computed(() => editingId.value !== null);
+const dialogTitle = computed(() => (isEditing.value ? '编辑供应商' : '添加供应商'));
+
+function resetModelState() {
+  modelList.value = [];
+  modelError.value = '';
+}
+
+function openCreate() {
+  const known = catalog.value.find((k) => k.kind === 'openai') ?? catalog.value[0];
+  editingId.value = null;
+  Object.assign(form, {
+    kind: known?.kind ?? 'openai',
+    name: '',
+    baseUrl: known?.baseUrl ?? '',
+    apiKey: '',
+    model: '',
+  });
+  resetModelState();
+  showDialog.value = true;
+}
+
+function openEdit(p: AiProvider) {
+  editingId.value = p.id;
+  Object.assign(form, {
+    kind: p.kind,
+    name: p.name,
+    baseUrl: p.base_url ?? '',
+    // 列表接口带回真实 Key，编辑框留空表示"不修改"
+    apiKey: '',
+    model: p.model ?? '',
+  });
+  resetModelState();
+  showDialog.value = true;
+}
+
+/** 切类型时带出名称与预设地址，只有自定义供应商需要手填 */
+function onKindChange() {
+  const known = catalog.value.find((k) => k.kind === form.kind);
+  form.baseUrl = known?.baseUrl ?? '';
+}
+
+/** 拉模型列表：编辑时用已保存的 Key 兜底，新增时用刚填的 */
+async function fetchModels() {
+  modelLoading.value = true;
+  modelError.value = '';
+  try {
+    const r = await api.post<{ models: string[] }>('/ai-providers/models', {
+      id: editingId.value ?? undefined,
+      baseUrl: form.baseUrl.trim(),
+      apiKey: form.apiKey.trim(),
+    });
+    modelList.value = r.models;
+    if (!r.models.length) modelError.value = '该供应商未返回模型，请手动输入';
+  } catch (e: any) {
+    modelList.value = [];
+    modelError.value = e.message ?? '获取模型列表失败';
+  } finally {
+    modelLoading.value = false;
+  }
+}
+
+async function submitProvider() {
+  if (savingProvider.value) return;
+  const known = catalog.value.find((k) => k.kind === form.kind);
+  const baseUrl = form.baseUrl.trim() || known?.baseUrl || '';
+  if (!baseUrl) {
+    toast.error('请填写请求地址');
+    return;
+  }
+  savingProvider.value = true;
+  try {
+    if (editingId.value !== null) {
+      const updated = await api.put<AiProvider>(`/ai-providers/${editingId.value}`, {
+        name: form.name.trim() || known?.name || 'AI 供应商',
+        baseUrl,
+        // 留空即保持原 Key 不变
+        apiKey: form.apiKey.trim() || undefined,
+        model: form.model.trim(),
+      });
+      const idx = providers.value.findIndex((p) => p.id === updated.id);
+      if (idx >= 0) providers.value[idx] = updated;
+    } else {
+      const created = await api.post<AiProvider>('/ai-providers', {
+        kind: form.kind,
+        name: form.name.trim() || known?.name || 'AI 供应商',
+        baseUrl,
+        apiKey: form.apiKey.trim(),
+        model: form.model.trim(),
+      });
+      providers.value.push(created);
+    }
+    showDialog.value = false;
+  } catch (e: any) {
+    toast.error((isEditing.value ? '保存失败: ' : '添加失败: ') + e.message);
+  } finally {
+    savingProvider.value = false;
+  }
+}
+
 const search = reactive({ provider: 'tavily', apiKey: '' });
 const feishu = reactive({ webhookUrl: '', secret: '' });
 const email = reactive({ smtpHost: '', smtpPort: '465', from: '', password: '', to: '' });
@@ -120,9 +322,12 @@ onMounted(async () => {
       api.get<Settings>('/settings'),
       api.get<Channel[]>('/notification-channels'),
     ]);
-    ai.baseUrl = s.ai_base_url ?? '';
-    ai.apiKey = s.ai_api_key ?? '';
-    ai.model = s.ai_model ?? '';
+    await loadProviders();
+    providerId.value = s.ai_provider_id
+      ? String(s.ai_provider_id)
+      : providers.value[0]
+        ? String(providers.value[0].id)
+        : '';
     search.provider = s.search_provider;
     search.apiKey = s.search_api_key ?? '';
     general.runMode = s.run_mode === 'agent' ? 'agent' : 'default';
@@ -145,9 +350,7 @@ onMounted(async () => {
 
 async function persistSettings() {
   await api.put('/settings', {
-    aiBaseUrl: ai.baseUrl || '',
-    aiApiKey: ai.apiKey || '',
-    aiModel: ai.model || '',
+    aiProviderId: providerId.value ? Number(providerId.value) : null,
     searchProvider: search.provider || 'tavily',
     searchApiKey: search.apiKey || '',
     runMode: general.runMode,
@@ -198,10 +401,12 @@ async function saveAll() {
 }
 
 // 内容变化自动保存：debounce 600ms，避免连续输入时频繁请求
-watchDebounced(() => ({ ai, search, feishu, email, general }), () => saveAll(), {
+watchDebounced(() => ({ search, feishu, email, general }), () => saveAll(), {
   debounce: 600,
   deep: true,
 });
+
+// 模型选择单独存：它属于全局 AI 配置，与推送/搜索无关，不必连带整份配置一起写
 
 async function sendTest(type: string) {
   if (testing.value) return;
@@ -294,32 +499,195 @@ async function sendTest(type: string) {
         </template>
 
         <template v-if="activeTab === 'ai'">
-          <Card>
-            <CardHeader>
-              <CardTitle>AI 配置</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div class="space-y-4">
-                <div class="space-y-2">
-                  <Label>请求地址</Label>
-                  <Input v-model="ai.baseUrl" type="text" placeholder="https://api.deepseek.com" />
+          <div>
+            <div class="mb-3 flex items-center justify-between">
+              <span class="text-xs font-medium uppercase tracking-wider text-gray-400">供应商</span>
+              <button
+                class="cursor-pointer text-xs text-gray-400 transition-colors hover:text-gray-700"
+                @click="openCreate"
+              >
+                ＋ 新增
+              </button>
+            </div>
+
+            <div
+              v-if="!providers.length"
+              class="rounded-xl border border-dashed border-gray-200 bg-white px-3 py-10 text-center text-sm text-gray-400"
+            >
+              还没有配置 AI 供应商
+            </div>
+
+            <div v-else class="space-y-3">
+              <div
+                v-for="p in providers"
+                :key="p.id"
+                class="group flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors"
+                :class="
+                  p.id === currentProvider?.id
+                    ? 'border-gray-300 bg-gray-50'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                "
+              >
+                <div
+                  class="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-gray-100 text-[13px] font-semibold text-gray-500"
+                >
+                  {{ providerInitial(p.kind) }}
                 </div>
-                <div class="space-y-2">
-                  <Label>API Key</Label>
-                  <div class="relative">
-                    <Input v-model="ai.apiKey" :type="showKey.ai ? 'text' : 'password'" placeholder="sk-..." class="pr-16" />
-                    <button class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600" @click="toggleKey('ai')">
-                      {{ showKey.ai ? '隐藏' : '显示' }}
-                    </button>
+
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="truncate text-sm font-medium text-gray-900">{{ p.name }}</span>
+                    <span
+                      v-if="p.kind === 'custom'"
+                      class="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] tracking-wide text-gray-500"
+                    >
+                      CUSTOM
+                    </span>
+                  </div>
+                  <div class="mt-0.5 flex items-center gap-1.5 text-xs">
+                    <span class="truncate text-gray-500">{{ p.base_url || '未配置请求地址' }}</span>
+                    <span class="shrink-0 text-gray-300">·</span>
+                    <span
+                      class="shrink-0 font-mono"
+                      :class="p.model ? 'text-gray-500' : 'text-gray-400'"
+                    >
+                      {{ p.model || '未选模型' }}
+                    </span>
                   </div>
                 </div>
-                <div class="space-y-2">
-                  <Label>模型</Label>
-                  <Input v-model="ai.model" type="text" placeholder="deepseek-chat" />
+
+                <div class="flex shrink-0 items-center gap-1">
+                  <span
+                    v-if="p.id === currentProvider?.id"
+                    class="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs text-gray-500 ring-1 ring-gray-200"
+                  >
+                    <CheckIcon class="size-3" :stroke-width="3" />
+                    使用中
+                  </span>
+                  <button
+                    v-else
+                    class="flex cursor-pointer items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-gray-800"
+                    @click="activateProvider(p)"
+                  >
+                    <PlayIcon class="size-3" />
+                    启用
+                  </button>
+
+                  <button
+                    class="cursor-pointer rounded-lg p-2 text-gray-300 transition hover:bg-gray-100 hover:text-gray-700"
+                    title="编辑"
+                    @click="openEdit(p)"
+                  >
+                    <PencilIcon class="size-4" />
+                  </button>
+                  <button
+                    class="cursor-pointer rounded-lg p-2 text-gray-300 transition hover:bg-red-50 hover:text-red-500"
+                    title="删除"
+                    @click="removeProvider(p)"
+                  >
+                    <Trash2Icon class="size-4" />
+                  </button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+
+          <Dialog :open="showDialog" @update:open="showDialog = $event">
+            <DialogContent class="sm:max-w-[520px]">
+              <DialogHeader>
+                <DialogTitle>{{ dialogTitle }}</DialogTitle>
+                <DialogDescription>选择已知供应商，或接入任意 OpenAI 兼容服务</DialogDescription>
+              </DialogHeader>
+
+              <div class="space-y-3 py-1">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="space-y-1.5">
+                    <Label class="text-xs text-gray-600">提供商</Label>
+                    <Select
+                      :model-value="form.kind"
+                      @update:model-value="
+                        (v) => {
+                          form.kind = String(v);
+                          onKindChange();
+                        }
+                      "
+                    >
+                      <SelectTrigger class="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem v-for="k in catalog" :key="k.kind" :value="k.kind">
+                          {{ k.name }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div class="space-y-1.5">
+                    <Label class="text-xs text-gray-600">名称</Label>
+                    <Input
+                      v-model="form.name"
+                      type="text"
+                      :placeholder="`默认：${catalog.find((k) => k.kind === form.kind)?.name ?? 'AI 供应商'}`"
+                    />
+                  </div>
+                  <div class="col-span-2 space-y-1.5">
+                    <Label class="text-xs text-gray-600">请求地址</Label>
+                    <Input v-model="form.baseUrl" type="text" placeholder="https://api.example.com/v1" />
+                  </div>
+                  <div class="col-span-2 space-y-1.5">
+                    <Label class="text-xs text-gray-600">API Key</Label>
+                    <Input
+                      v-model="form.apiKey"
+                      type="password"
+                      :placeholder="isEditing ? '留空则不修改' : 'sk-...'"
+                    />
+                  </div>
+                </div>
+
+                <div class="border-t border-gray-200 pt-3">
+                  <div class="mb-2 flex items-center justify-between">
+                    <Label class="text-xs text-gray-600">模型</Label>
+                    <button
+                      class="cursor-pointer text-xs text-gray-400 transition-colors hover:text-gray-700 disabled:cursor-not-allowed"
+                      :disabled="modelLoading"
+                      @click="fetchModels"
+                    >
+                      {{ modelLoading ? '获取中…' : '获取模型列表' }}
+                    </button>
+                  </div>
+                  <Input v-model="form.model" type="text" placeholder="选择或手动输入模型名" />
+
+                  <div
+                    v-if="modelList.length"
+                    class="mt-2 max-h-40 overflow-y-auto rounded-md border border-gray-200"
+                  >
+                    <button
+                      v-for="m in modelList"
+                      :key="m"
+                      class="flex w-full cursor-pointer items-center gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0"
+                      :class="m === form.model ? 'bg-gray-100' : 'hover:bg-gray-50'"
+                      @click="form.model = m"
+                    >
+                      <CheckIcon
+                        class="size-3 shrink-0"
+                        :class="m === form.model ? 'text-gray-900' : 'text-transparent'"
+                        :stroke-width="3"
+                      />
+                      <span class="min-w-0 truncate font-mono text-xs text-gray-700">{{ m }}</span>
+                    </button>
+                  </div>
+                  <p v-if="modelError" class="mt-2 text-xs text-red-500">{{ modelError }}</p>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" @click="showDialog = false">取消</Button>
+                <Button :disabled="savingProvider" @click="submitProvider">
+                  {{ savingProvider ? '保存中…' : isEditing ? '保存' : '添加' }}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </template>
 
         <template v-if="activeTab === 'push'">
