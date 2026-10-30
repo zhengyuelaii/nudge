@@ -10,9 +10,7 @@ export interface InterestBrief {
   name: string;
   query_keywords?: string | null;
   description?: string | null;
-  /** 关注判据：监控主体。与 criteria 同时为空 → 按旧行为分析（无判据） */
-  subject?: string | null;
-  /** 关注判据：触发条件。命中才算「变化」 */
+  /** 关注判据：触发条件。命中才算「变化」；留空 → 按旧行为分析（无判据） */
   criteria?: string | null;
 }
 

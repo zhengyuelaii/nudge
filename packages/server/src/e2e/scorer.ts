@@ -20,7 +20,7 @@ import type { SearchResult } from '../search/types.js';
 
 export interface E2EScoreInput {
   /** 兴趣定义：判据就是评分的标尺，judge 必须看到它 */
-  interest: { name: string; subject: string; criteria: string };
+  interest: { name: string; criteria: string };
   /** 本轮 Tavily 真实返回的全部结果 —— 评分参照系，用来判断来源是否真实、是否漏判 */
   searchResults: SearchResult[];
   run: {
@@ -366,8 +366,7 @@ function buildJudgePrompt(input: E2EScoreInput): string {
 
 【本兴趣的判定标尺】
 - 名称：${interest.name}
-- 监控主体：${interest.subject || '（未填）'}
-- 触发条件：${interest.criteria || '（未填，按主体重要事实变化判断）'}
+- 触发条件：${interest.criteria || '（未填，按重要事实变化判断）'}
 
 【本轮检索到的全部原料】（共 ${searchResults.length} 条，这是系统能看到的全部信息）
 ${material || '（无）'}
@@ -451,7 +450,6 @@ function renderReport(
   lines.push('');
   lines.push('════════════ Nudge E2E 评分报告 ════════════');
   lines.push(`兴趣：${interest.name}`);
-  lines.push(`监控主体：${interest.subject || '（未填）'}`);
   lines.push(`触发条件：${interest.criteria || '（未填）'}`);
   lines.push('');
   lines.push('──── 本轮发生了什么 ────');

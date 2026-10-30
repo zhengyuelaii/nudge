@@ -6,8 +6,7 @@ export const createInterestSchema = z.object({
   tags: z.array(z.string().min(1).max(50)).min(1).max(10),
   description: z.string().optional(),
   queryKeywords: z.string().optional(),
-  // 关注判据：均为可选，留空表示未配置（退化为无判据的旧行为）
-  subject: z.string().max(200).optional(),
+  // 关注判据：可选，留空表示未配置（退化为无判据的旧行为）
   criteria: z.string().max(500).optional(),
   frequency: z.enum(['day', 'week']),
   time: z.string().regex(/^\d{2}:\d{2}$/),
@@ -19,7 +18,6 @@ export const updateInterestSchema = z.object({
   tags: z.array(z.string().min(1).max(50)).min(1).max(10).optional(),
   description: z.string().optional(),
   queryKeywords: z.string().optional(),
-  subject: z.string().max(200).optional(),
   criteria: z.string().max(500).optional(),
   frequency: z.enum(['day', 'week']).optional(),
   time: z.string().regex(/^\d{2}:\d{2}$/).optional(),

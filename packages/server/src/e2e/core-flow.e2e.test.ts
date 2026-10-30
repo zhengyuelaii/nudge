@@ -30,7 +30,6 @@ const INTEREST_DRAFT = {
   tags: ['commodity'],
   description: '关注国际金价的重大波动；日常小幅波动、机构观点、板块综述不需要提醒。',
   queryKeywords: '国际金价 黄金价格 走势',
-  subject: '国际金价',
   criteria: '单日涨跌幅超过 2%，或价格创下历史新高 / 跌破重要整数关口',
   frequency: 'day' as const,
   time: '09:00',
@@ -152,7 +151,6 @@ describe.skipIf(!HAS_CREDENTIALS)('E2E 核心业务流程（真实 Tavily + 真�
       const report = await scoreRun({
         interest: {
           name: interest.name,
-          subject: interest.subject,
           criteria: interest.criteria,
         },
         searchResults: recorder.tavilyResults,

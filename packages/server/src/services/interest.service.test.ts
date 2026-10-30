@@ -24,21 +24,19 @@ beforeEach(() => {
 });
 
 describe('interestService watch criteria', () => {
-  it('persists subject and criteria on create and reads them back', () => {
+  it('persists criteria on create and reads it back', () => {
     const created = interestService.create(1, {
       name: '生物安全法案',
       tags: ['policy'],
       frequency: 'day',
       time: '09:00',
-      subject: '美国生物安全法案',
       criteria: '出现修订、新增条款或进入投票环节',
     });
 
-    expect(created.subject).toBe('美国生物安全法案');
     expect(created.criteria).toBe('出现修订、新增条款或进入投票环节');
   });
 
-  it('defaults both to empty string when not provided', () => {
+  it('defaults criteria to empty string when not provided', () => {
     const created = interestService.create(1, {
       name: '不配置判据',
       tags: ['t'],
@@ -46,18 +44,15 @@ describe('interestService watch criteria', () => {
       time: '09:00',
     });
 
-    expect(created.subject).toBe('');
     expect(created.criteria).toBe('');
   });
 
-  it('updates subject and criteria', () => {
+  it('updates criteria', () => {
     interestService.update(1, seedInterestId, {
-      subject: '国际金价',
       criteria: '突破 4200 美元/盎司',
     });
 
     const got = interestService.get(1, seedInterestId);
-    expect(got.subject).toBe('国际金价');
     expect(got.criteria).toBe('突破 4200 美元/盎司');
   });
 });

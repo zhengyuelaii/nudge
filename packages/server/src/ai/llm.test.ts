@@ -284,14 +284,12 @@ describe('analyze', () => {
     await analyze(
       {
         ...interest,
-        subject: '美国生物安全法案',
         criteria: '出现修订、新增条款或进入投票环节',
       },
       settings,
       { model, fetchImpl },
     );
 
-    expect(promptText).toContain('监控主体：美国生物安全法案');
     expect(promptText).toContain('触发条件：出现修订、新增条款或进入投票环节');
     // 有判据时判定规则换成「当且仅当命中触发条件」
     expect(promptText).toContain('当且仅当');
@@ -305,7 +303,6 @@ describe('analyze', () => {
 
     await analyze(interest, settings, { model, fetchImpl });
 
-    expect(promptText).not.toContain('监控主体');
     expect(promptText).not.toContain('判定标准');
     expect(promptText).not.toContain('当且仅当');
   });

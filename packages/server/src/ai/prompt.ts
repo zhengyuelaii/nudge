@@ -23,17 +23,15 @@ export interface BuildPromptInput {
 }
 
 /**
- * 关注判据块：只有配置了主体或触发条件的兴趣才输出。
- * 两者都留空时整块不出现，prompt 与「无判据」的旧行为一致。
+ * 关注判据块：只有配置了触发条件的兴趣才输出。
+ * 留空时整块不出现，prompt 与「无判据」的旧行为一致。
  */
 function buildCriteriaBlock(interest: InterestBrief): string {
-  const subject = interest.subject?.trim() ?? '';
   const criteria = interest.criteria?.trim() ?? '';
-  if (!subject && !criteria) return '';
+  if (!criteria) return '';
 
-  const subjectLine = subject ? `- 监控主体：${subject}\n` : '';
   return `本兴趣的判定标准（只有命中的信息才算变化）：
-${subjectLine}- 触发条件：${criteria || '未填写，请以监控主体的重要事实变化为准'}
+- 触发条件：${criteria}
 未命中上述条件的信息一律视为无关，不得放进 source。
 
 判定示例：
